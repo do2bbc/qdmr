@@ -58,6 +58,13 @@ Radio::callsignDB() {
   return nullptr;
 }
 
+bool
+Radio::startDownloadCallsignDB(const TransferFlags &flags, const ErrorStack &err) {
+  Q_UNUSED(flags)
+  errMsg(err) << "Call-sign database download is not implemented for this radio.";
+  return false;
+}
+
 
 Radio *
 Radio::detect(const USBDeviceDescriptor &descr, const RadioInfo &force, const ErrorStack &err) {

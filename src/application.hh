@@ -67,6 +67,8 @@ public slots:
   bool verifyCodeplug(Radio *radio=nullptr, bool showSuccess=true);
 
   void downloadCodeplug();
+  void downloadCallsignDB();
+  void importCallsignDB();
   void uploadCodeplug();
   void uploadCallsignDB();
   void uploadSatellites();
@@ -80,6 +82,8 @@ public slots:
 private slots:
   void onCodeplugDownloadError(Radio *radio);
   void onCodeplugDownloaded(Radio *radio, Codeplug *codeplug);
+  void onCallsignDBDownloadError(Radio *radio);
+  void onCallsignDBDownloaded(Radio *radio, const QByteArray &json);
 
   void onCodeplugUploadError(Radio *radio);
   void onCodeplugUploaded(Radio *radio);

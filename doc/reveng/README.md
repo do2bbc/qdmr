@@ -49,12 +49,13 @@ as that same page-image format.
 
 | Area | Public map | qdmr status |
 | --- | --- | --- |
-| Channel records and names | Markers `0x16`-`0x22`, `0x24`-`0x26` | RT72-specific channel type, documented DMR/FM fields and names decoded; channel names editable |
+| Channel records and names | Markers `0x16`-`0x22`, `0x24`-`0x26` | RT72-specific channel type, RX/TX frequencies, RX-only, Lone Worker (bit 3 of byte `0x18`), Auto Start Scan (bit 7 of byte `0x19`), emergency flags/system, and names decoded/editable |
 | Contact records and allocation map | Marker `0x0b`, markers `0x28`-`0x2c` | Decoded; contact aliases editable |
 | Channel TX-contact map | Marker `0x27`, first `0x800` bytes | Decoded and editable for stored contacts |
+| LContact contact database | Address `0x246000`; 16-byte header, up to 6,750 108-byte records, 37 records per 4-KiB page | Read to qdmr-compatible `users.json`, import of RadioID JSON/CSV lists, and upload are implemented. The filtered 5,785-entry RadioID CSV was hardware-written and read back exactly; over-width text fields are limited to their fixed widths |
 | RX groups | Marker `0x11` first `0x606` bytes and marker `0x12` first `0x73d` bytes | Decoded; group membership editable |
 | Scan lists | Marker `0x13`; 32 records of `0x39` bytes, active count in byte 0, names at `+1`, up to 15 one-based channel slots from `+0x1b`; priority channels at `+0x12/+0x13` | Names, membership, priority channels and channel default-list links decoded/editable; new lists appendable (up to 32); TX/revert and timing fields remain untouched |
-| Radio settings | Marker `0x04` | Radio alias, APRS enable and data-transmit server decoded/editable |
+| Radio settings | Marker `0x04` | Radio alias, APRS enable, data-transmit server, and two 16-byte boot messages at `0x180`/`0x1c0` decoded/editable |
 | VFO records | Marker `0x78`; VFO A RX/TX at `0xfa0`/`0xfa4`, VFO B RX/TX at `0xfd0`/`0xfd4`; each is 24-bit little-endian BCD in kHz | Four RX/TX frequencies decoded and editable |
 | Systems, lone worker and privacy | Marker `0x11`, ranges `0x606`-`0x6ab`, `0x700`-`0x7ff`, `0x800`-`0xbff` | Ranges located; field layouts are incomplete or marked uncertain |
 | Zones | Markers `0x45`-`0x56`; `0x112`-byte records with a 16-byte name, then A/B counts and up to 64 little-endian one-based channel indices per side | Names and A/B membership decoded; appending and editing supported, removal rejected |
@@ -73,3 +74,10 @@ only to satisfy an RX group, because they have no contact record in the radio. R
 bit 6 of record byte `0x18`; this interpretation matches the `Type` column for all 25 local CPS
 channels. Scan-list memberships are decoded conservatively; priority channels at `+0x12/+0x13` are
 decoded and editable, while TX/revert and timing fields remain unmapped.
+
+For DM-1702S DMR channels, byte `0x1b` contains Emergency Alarm Indication in bit 7, Emergency Call
+Indication in bit 6, Emergency Alarm Ack in bit 5, and a one-based Emergency System number in bits
+3-0 (zero means none). This mapping is confirmed by cumulative CPS variants; bit 4 is preserved.
+The CPS clears Emergency Call Indication when RX-only is enabled; qdmr rejects that combination
+rather than silently dropping either setting. The cumulative CPS channel tests are documented in
+`dm1702s-channel-cps-test-plan.md`.

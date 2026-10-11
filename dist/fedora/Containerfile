@@ -1,0 +1,14 @@
+FROM quay.io/fedora/fedora:44
+
+RUN dnf -y install \
+      cmake cmake-rpm-macros gcc-c++ make rpm-build redhat-rpm-config \
+      docbook5-style-xsl xsltproc hicolor-icon-theme librsvg2-tools \
+      pkgconf-pkg-config qt6-qtbase-devel qt6-qtconnectivity-devel \
+      qt6-qtpositioning-devel qt6-qtserialport-devel qt6-qtmultimedia-devel \
+      qt6-qttools-devel libusb1-devel yaml-cpp-devel \
+    && dnf clean all
+
+COPY qdmr.spec /opt/qdmr/qdmr.spec
+COPY build-rpm-container.sh /usr/local/bin/build-qdmr-rpm
+
+ENTRYPOINT ["/usr/local/bin/build-qdmr-rpm"]

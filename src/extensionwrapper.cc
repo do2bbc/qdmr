@@ -14,9 +14,18 @@
  * Implementation of ExtensionProxy
  * ******************************************************************************************** */
 ExtensionProxy::ExtensionProxy(QObject *parent)
-  : QIdentityProxyModel(parent)
+  : QIdentityProxyModel(parent), _dm1702sEnabled(false)
 {
   // pass...
+}
+
+void
+ExtensionProxy::setDM1702SEnabled(bool enabled) {
+  if (_dm1702sEnabled == enabled)
+    return;
+  _dm1702sEnabled = enabled;
+  if (sourceModel())
+    setSourceModel(sourceModel());
 }
 
 void
@@ -27,7 +36,11 @@ ExtensionProxy::setSourceModel(QAbstractItemModel *sourceModel) {
   if (PropertyWrapper *model = qobject_cast<PropertyWrapper *>(sourceModel)) {
     // Create root element maps
     for (int s=0,p=0; s<model->rowCount(QModelIndex()); s++) {
-      if (model->isExtension(model->index(s,0, QModelIndex()))) {
+      const QModelIndex sourceIndex=model->index(s, 0, QModelIndex());
+      const QMetaProperty property=model->propertyAt(sourceIndex);
+      if ((!_dm1702sEnabled) && (QByteArrayLiteral("dm1702s") == property.name()))
+        continue;
+      if (model->isExtension(sourceIndex)) {
         _indexP2S[p] = s;
         _indexS2P[s] = p;
         p++;

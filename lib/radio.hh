@@ -8,6 +8,7 @@
 #ifndef RADIO_HH
 #define RADIO_HH
 
+#include <QByteArray>
 #include <QThread>
 #include "radioinfo.hh"
 #include "radiointerface.hh"
@@ -37,6 +38,7 @@ public:
 	typedef enum {
     StatusIdle,             ///< Idle, nothing to do.
     StatusDownload,         ///< Downloading codeplug.
+    StatusDownloadCallsigns,///< Downloading call-sign database.
     StatusUpload,           ///< Uploading codeplug.
     StatusUploadCallsigns,  ///< Uploading codeplug.
     StatusUploadSatellites, ///< Uploading satellite config.
@@ -88,6 +90,10 @@ public slots:
    * the @c codeplug() method. */
   virtual bool startDownload(const TransferFlags &flags, const ErrorStack &err=ErrorStack()) = 0;
 
+  /** Reads a radio's call-sign database, when supported. */
+  virtual bool startDownloadCallsignDB(const TransferFlags &flags,
+                                       const ErrorStack &err=ErrorStack());
+
   /** Derives the device-specific codeplug from the generic configuration and uploads that
    * codeplug to the radio. */
   virtual bool startUpload(
@@ -110,6 +116,8 @@ signals:
 	void downloadProgress(int percent);
   /** Gets emitted once the codeplug download has been finished. */
   void downloadFinished(Radio *radio, Codeplug *codeplug);
+  /** Gets emitted once a call-sign database download has finished. */
+  void downloadCallsignDBFinished(Radio *radio, const QByteArray &json);
   /** Gets emitted if there was an error during the codeplug download. */
 	void downloadError(Radio *radio);
 

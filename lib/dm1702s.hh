@@ -21,6 +21,8 @@ public:
   Codeplug &codeplug() override;
 
   bool startDownload(const TransferFlags &flags, const ErrorStack &err=ErrorStack()) override;
+  bool startDownloadCallsignDB(const TransferFlags &flags,
+                               const ErrorStack &err=ErrorStack()) override;
   bool startUpload(Config *config, const Codeplug::Flags &flags,
                    const ErrorStack &err=ErrorStack()) override;
   bool startUploadCallsignDB(UserDatabase *db, const CallsignDB::Flags &selection,
@@ -33,13 +35,17 @@ protected:
 
 private:
   bool download(const ErrorStack &err);
+  bool downloadCallsignDatabase(const ErrorStack &err);
   bool upload(const ErrorStack &err);
+  bool uploadCallsignDatabase(const ErrorStack &err);
 
   DM1702SInterface *_device;
   QString _name;
   DM1702SCodeplug _codeplug;
   Config *_config;
   Codeplug::Flags _codeplugFlags;
+  QByteArray _callSignDatabase;
+  QByteArray _downloadedCallsignDatabaseJson;
   static RadioLimits *_limits;
 };
 

@@ -9,6 +9,9 @@ class DM1702STest : public QObject
 
 private slots:
   void testChannelDecode();
+  void testCallsignDatabaseEncoding();
+  void testCallsignDatabaseDecoding();
+  void testRadioIdCSVImport();
   void testSettingsYAMLSerialization();
   void testEncodingRequiresDecodedSource();
   void testRadioRegistrationIsExplicit();

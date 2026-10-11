@@ -42,6 +42,11 @@ private:
   QVector<int> _originalChannelContactIndexes;
   QVector<int> _originalChannelGPSIndexes;
   QVector<int> _originalChannelScanListIndexes;
+  QVector<Frequency> _originalChannelRXFrequencies;
+  QVector<Frequency> _originalChannelTXFrequencies;
+  QVector<uint8_t> _originalChannelFlags18;
+  QVector<uint8_t> _originalChannelFlags19;
+  QVector<uint8_t> _originalChannelEmergencySettings;
   QVector<ContactRecord> _originalContacts;
   QVector<size_t> _originalRXGroupOffsets;
   QStringList _originalRXGroupNames;
@@ -54,6 +59,8 @@ private:
   QVector<QVector<unsigned int>> _originalZoneAMembers;
   QVector<QVector<unsigned int>> _originalZoneBMembers;
   QStringList _originalGPSSystemNames;
+  QString _originalBootMessage1;
+  QString _originalBootMessage2;
   QString _originalRadioAlias;
   bool _originalAprsEnabled;
   DM1702SSettingsExtension::DataTransmitServer _originalDataTransmitServer;

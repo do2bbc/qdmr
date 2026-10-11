@@ -66,6 +66,7 @@ MainWindow::MainWindow(Config *config, QWidget *parent)
   connect(ui->actionRefreshCallsignDB, &QAction::triggered, [app, progress]() {
     progress->addTask(app->user()->download());
   });
+  connect(ui->actionImportCallsignDB, SIGNAL(triggered()), app, SLOT(importCallsignDB()));
 
   connect(ui->actionRefreshTalkgroupDB, &QAction::triggered, [app, progress]() {
     progress->addTask(app->talkgroup()->download());
@@ -93,6 +94,7 @@ MainWindow::MainWindow(Config *config, QWidget *parent)
   connect(ui->actionDetectDevice, SIGNAL(triggered()), app, SLOT(detectRadio()));
   connect(ui->actionVerifyCodeplug, SIGNAL(triggered()), app, SLOT(verifyCodeplug()));
   connect(ui->actionDownload, SIGNAL(triggered()), app, SLOT(downloadCodeplug()));
+  connect(ui->actionDownloadCallsignDB, SIGNAL(triggered()), app, SLOT(downloadCallsignDB()));
   connect(ui->actionUpload, SIGNAL(triggered()), app, SLOT(uploadCodeplug()));
   connect(ui->actionWriteSatellites, SIGNAL(triggered()), app, SLOT(uploadSatellites()));
 

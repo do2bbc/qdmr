@@ -1,6 +1,7 @@
 #include "application.hh"
 #include <QtUiTools>
 #include <QDesktopServices>
+#include <QSaveFile>
 #include <QTranslator>
 #include <QStandardPaths>
 
@@ -533,6 +534,72 @@ Application::downloadCodeplug() {
 }
 
 void
+Application::downloadCallsignDB() {
+  if (!_mainWindow)
+    return;
+
+  Radio *radio=autoDetect();
+  if (nullptr == radio) {
+    QMessageBox::warning(nullptr, tr("No radio found"),
+                         tr("No matching device was found."));
+    return;
+  }
+  if (!radio->limits().hasCallSignDB() || !radio->limits().callSignDBImplemented()) {
+    QMessageBox::information(nullptr, tr("Cannot read call-sign DB."),
+                             tr("The detected radio '%1' does not support call-sign database download.")
+                             .arg(radio->name()));
+    radio->deleteLater();
+    return;
+  }
+
+  connect(radio, &Radio::downloadError, this, &Application::onCallsignDBDownloadError);
+  connect(radio, &Radio::downloadCallsignDBFinished, this, &Application::onCallsignDBDownloaded);
+  TransferFlags flags;
+  flags.setBlocking(false);
+  ErrorStack err;
+  if (radio->startDownloadCallsignDB(flags, err)) {
+    _mainWindow->setEnabled(false);
+    auto progress=_mainWindow->findChild<TaskProgressListView *>("progress");
+    progress->addTask(new RadioTransferTaskProgress(tr("Read call-sign DB"), radio));
+  } else {
+    ErrorMessageView(err).exec();
+    radio->deleteLater();
+  }
+}
+
+void
+Application::importCallsignDB() {
+  if (!_mainWindow)
+    return;
+
+  Settings settings;
+  const QString filename=QFileDialog::getOpenFileName(
+      nullptr, tr("Import call-sign database"), settings.lastDirectory().absolutePath(),
+      tr("User database JSON (*.json);;RadioID/LContact CSV (*.csv)"));
+  if (filename.isEmpty())
+    return;
+
+  QString errorMessage;
+  const auto errorConnection=connect(_users, &UserDatabase::error, this,
+                                     [&errorMessage](const QString &message) {
+    errorMessage=message;
+  });
+  const bool loaded=_users->load(filename);
+  disconnect(errorConnection);
+  if (!loaded) {
+    QMessageBox::critical(nullptr, tr("Cannot import call-sign database"),
+                          errorMessage.isEmpty()
+                              ? tr("Cannot import call-sign database from '%1'.").arg(filename)
+                              : errorMessage);
+    return;
+  }
+
+  settings.setLastDirectoryDir(QFileInfo(filename).absoluteDir());
+  _mainWindow->statusBar()->showMessage(
+      tr("Loaded %1 call-sign entries for this session.").arg(_users->count()), 7000);
+}
+
+void
 Application::onCodeplugDownloadError(Radio *radio) {
   _mainWindow->statusBar()->showMessage(tr("Read error"));
   ErrorMessageView(radio->errorStack()).exec();
@@ -566,6 +633,40 @@ Application::onCodeplugDownloaded(Radio *radio, Codeplug *codeplug) {
 
   _mainWindow->setEnabled(true);
 
+  if (radio->wait(250))
+    radio->deleteLater();
+}
+
+void
+Application::onCallsignDBDownloadError(Radio *radio) {
+  _mainWindow->statusBar()->showMessage(tr("Call-sign DB read error"));
+  ErrorMessageView(radio->errorStack()).exec();
+  _mainWindow->setEnabled(true);
+  if (radio->wait(250))
+    radio->deleteLater();
+}
+
+void
+Application::onCallsignDBDownloaded(Radio *radio, const QByteArray &json) {
+  Settings settings;
+  QString filename=QFileDialog::getSaveFileName(
+      nullptr, tr("Save call-sign database"),
+      settings.lastDirectory().absoluteFilePath(QStringLiteral("users.json")),
+      tr("User database JSON (*.json)"));
+  if (!filename.isEmpty()) {
+    if (!filename.endsWith(QStringLiteral(".json"), Qt::CaseInsensitive))
+      filename.append(QStringLiteral(".json"));
+    QSaveFile file(filename);
+    if ((!file.open(QIODevice::WriteOnly)) || (file.write(json) != json.size()) || !file.commit()) {
+      QMessageBox::critical(nullptr, tr("Cannot save call-sign database"),
+                            tr("Cannot save call-sign database to '%1': %2")
+                            .arg(filename, file.errorString()));
+    } else {
+      settings.setLastDirectoryDir(QFileInfo(filename).absoluteDir());
+      _mainWindow->statusBar()->showMessage(tr("Call-sign DB saved"), 5000);
+    }
+  }
+  _mainWindow->setEnabled(true);
   if (radio->wait(250))
     radio->deleteLater();
 }

@@ -646,7 +646,7 @@ DMRChannel::DMRChannel(QObject *parent)
     _colorCode(1), _timeSlot(TimeSlot::TS1),
     _rxGroup(), _txContact(), _posSystem(), _roaming(), _radioId(),
     _extended(new DMRChannelExtension(this)),
-    _commercialExtension(nullptr), _anytoneExtension(nullptr)
+    _commercialExtension(nullptr), _anytoneExtension(nullptr), _dm1702sExtension(nullptr)
 {
   // Register default tags
   if (! ConfigItem::Context::tagIsSet(staticMetaObject.className(), "roaming", "!default"))
@@ -678,6 +678,7 @@ DMRChannel::clear() {
   setRadioId(DefaultRadioID::get());
   setCommercialExtension(nullptr);
   setAnytoneChannelExtension(nullptr);
+  setDM1702SChannelExtension(nullptr);
 }
 
 ConfigItem *
@@ -878,6 +879,24 @@ DMRChannel::setAnytoneChannelExtension(AnytoneDMRChannelExtension *ext) {
   if (_anytoneExtension) {
     _anytoneExtension->setParent(this);
     connect(_anytoneExtension, SIGNAL(modified(ConfigItem*)), this, SLOT(onReferenceModified()));
+  }
+}
+
+DM1702SChannelExtension *
+DMRChannel::dm1702sChannelExtension() const {
+  return _dm1702sExtension;
+}
+
+void
+DMRChannel::setDM1702SChannelExtension(DM1702SChannelExtension *ext) {
+  if (_dm1702sExtension == ext)
+    return;
+  if (_dm1702sExtension)
+    _dm1702sExtension->deleteLater();
+  _dm1702sExtension = ext;
+  if (_dm1702sExtension) {
+    _dm1702sExtension->setParent(this);
+    connect(_dm1702sExtension, SIGNAL(modified(ConfigItem*)), this, SLOT(onReferenceModified()));
   }
 }
 

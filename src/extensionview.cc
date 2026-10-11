@@ -3,6 +3,7 @@
 #include "propertydelegate.hh"
 #include "extensionwrapper.hh"
 #include "settings.hh"
+#include "config.hh"
 #include <QMessageBox>
 
 
@@ -38,6 +39,7 @@ ExtensionView::setObject(ConfigItem *obj, Config *context) {
   if (nullptr != _model)
     _model->deleteLater();
   _model = new PropertyWrapper(obj, this);
+  _proxy.setDM1702SEnabled(context && context->settings()->dm1702sExtension());
   _proxy.setSourceModel(_model);
   _editor.setConfig(context);
 }

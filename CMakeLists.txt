@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.25.0)
-project(qdmr VERSION 0.15.1)
+project(qdmr VERSION 0.15.2)
 
-set(RELEASE_SUFFIX "")
+set(RELEASE_SUFFIX "" CACHE STRING "Optional suffix for prerelease builds")
 
 cmake_policy(SET CMP0100 NEW)
 cmake_policy(SET CMP0140 NEW)
@@ -71,8 +71,8 @@ INCLUDE_DIRECTORIES(${PROJECT_BINARY_DIR}/lib)
 LINK_DIRECTORIES(${PROJECT_BINARY_DIR}/src)
 
 
-set(PROJECT_VERSION_STRING "\"${PROJECT_VERSION}\"")
-message(STATUS "Build version ${PROJECT_VERSION}")
+set(PROJECT_VERSION_STRING "\"${PROJECT_VERSION}${RELEASE_SUFFIX}\"")
+message(STATUS "Build version ${PROJECT_VERSION}${RELEASE_SUFFIX}")
 
 # Set compiler flags
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wsign-compare")
@@ -116,6 +116,8 @@ endif(BUILD_TESTS)
 set(CPACK_SOURCE_GENERATOR "TGZ")
 set(CPACK_SOURCE_PACKAGE_FILE_NAME
   "${CMAKE_PROJECT_NAME}-${PROJECT_VERSION}${RELEASE_SUFFIX}")
+set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}${RELEASE_SUFFIX}")
+set(CPACK_PACKAGE_FILE_NAME "${CMAKE_PROJECT_NAME}-${PROJECT_VERSION}${RELEASE_SUFFIX}")
 set(CPACK_SOURCE_IGNORE_FILES
   "/build/;/doc/html;/doc/latex;/doc/reveng;/doc/dmr-intro;/examples/.*[.]dfu$;/.git/;~$;.*[.]qm$;.*[.]user$;${CPACK_SOURCE_IGNORE_FILES}")
 

@@ -75,6 +75,10 @@ RadioTransferTaskProgress::RadioTransferTaskProgress(const QString &label, Radio
     Q_UNUSED(radio);
     finish(true, tr("Read complete."));
   });
+  connect(radio, &Radio::downloadCallsignDBFinished, [this](Radio *radio, const QByteArray &) {
+    Q_UNUSED(radio);
+    finish(true, tr("Call-sign database read complete."));
+  });
   connect(radio, &Radio::uploadProgress, this, &TaskProgress::progress);
   connect(radio, &Radio::uploadError, [this](Radio *radio) {
     Q_UNUSED(radio);

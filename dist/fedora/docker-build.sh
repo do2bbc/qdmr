@@ -1,7 +1,7 @@
 #!/bin/bash 
 
 cp /mnt/qdmr.spec /root/rpmbuild/SPECS
-VERSION="0.13.2"
+VERSION="0.15.2"
 TARBALL="v${VERSION}.tar.gz"
 
 # Download sources

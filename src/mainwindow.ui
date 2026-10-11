@@ -89,6 +89,7 @@
     <addaction name="actionVerifyCodeplug"/>
     <addaction name="separator"/>
     <addaction name="actionDownload"/>
+    <addaction name="actionDownloadCallsignDB"/>
     <addaction name="actionUpload"/>
     <addaction name="actionUploadCallsignDB"/>
     <addaction name="actionWriteSatellites"/>
@@ -105,6 +106,7 @@
      <string>Databases</string>
     </property>
     <addaction name="actionRefreshCallsignDB"/>
+      <addaction name="actionImportCallsignDB"/>
     <addaction name="actionRefreshTalkgroupDB"/>
     <addaction name="actionRefreshOrbitalElements"/>
     <addaction name="actionEditSatellites"/>
@@ -239,6 +241,17 @@
     <string>Reads a codeplug from connected radios.</string>
    </property>
   </action>
+    <action name="actionDownloadCallsignDB">
+     <property name="icon">
+        <iconset theme="document-download"/>
+     </property>
+     <property name="text">
+        <string>Read Call-sign DB ...</string>
+     </property>
+     <property name="toolTip">
+        <string>Reads the call-sign database from a supported radio and saves it as users.json.</string>
+     </property>
+    </action>
   <action name="actionUpload">
    <property name="icon">
     <iconset theme="device-write"/>
@@ -302,6 +315,17 @@
     <string>Refreshes the downloaded callsign DB</string>
    </property>
   </action>
+   <action name="actionImportCallsignDB">
+    <property name="icon">
+      <iconset theme="document-import"/>
+    </property>
+    <property name="text">
+      <string>Import Call-sign DB ...</string>
+    </property>
+    <property name="toolTip">
+      <string>Loads a users.json call-sign list for upload during this session.</string>
+    </property>
+   </action>
   <action name="actionRefreshTalkgroupDB">
    <property name="icon">
     <iconset theme="document-download"/>

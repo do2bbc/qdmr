@@ -3,6 +3,7 @@
 #include <QJsonArray>
 #include <QStandardPaths>
 #include <QFile>
+#include <QFileInfo>
 #include <QDir>
 #include <QNetworkReply>
 #include <QtConcurrent>
@@ -10,6 +11,141 @@
 #include "logger.hh"
 #include <cmath>
 #include "task_progress.hh"
+
+namespace {
+bool parseCsvRows(const QString &text, QList<QStringList> &rows, QString &error) {
+  QStringList row;
+  QString field;
+  bool quoted=false;
+  bool quoteClosed=false;
+  auto finishRow=[&]() {
+    row.append(field);
+    field.clear();
+    if (std::any_of(row.cbegin(), row.cend(), [](const QString &value) {
+          return !value.trimmed().isEmpty();
+        }))
+      rows.append(row);
+    row.clear();
+    quoteClosed=false;
+  };
+
+  for (int index=0; index<text.size(); ++index) {
+    const QChar character=text[index];
+    if (quoted) {
+      if ('"' == character) {
+        if ((index+1 < text.size()) && ('"' == text[index+1])) {
+          field.append('"');
+          ++index;
+        } else {
+          quoted=false;
+          quoteClosed=true;
+        }
+      } else {
+        field.append(character);
+      }
+      continue;
+    }
+
+    if (quoteClosed && ((0x20 == character.unicode()) || (0x09 == character.unicode())))
+      continue;
+    if (quoteClosed && (',' != character) && ('\r' != character) && ('\n' != character)) {
+      error=QObject::tr("Unexpected character after a quoted CSV field.");
+      return false;
+    }
+    if (',' == character) {
+      row.append(field);
+      field.clear();
+      quoteClosed=false;
+    } else if ((0x0d == character.unicode()) || (0x0a == character.unicode())) {
+      finishRow();
+      if ((0x0d == character.unicode()) && (index+1 < text.size()) &&
+          (0x0a == text[index+1].unicode()))
+        ++index;
+    } else if ('"' == character) {
+      if (!field.isEmpty()) {
+        error=QObject::tr("Unexpected quote in an unquoted CSV field.");
+        return false;
+      }
+      quoted=true;
+    } else {
+      field.append(character);
+    }
+  }
+  if (quoted) {
+    error=QObject::tr("Unterminated quoted CSV field.");
+    return false;
+  }
+  if (!field.isEmpty() || !row.isEmpty())
+    finishRow();
+  return true;
+}
+
+QString normalizeHeader(QString header) {
+  if (!header.isEmpty() && (header[0] == QChar::ByteOrderMark))
+    header.remove(0, 1);
+  return header.trimmed().toLower();
+}
+
+bool parseRadioIdCSV(const QByteArray &data, QList<UserDatabase::User> &users, QString &error) {
+  QList<QStringList> rows;
+  if (!parseCsvRows(QString::fromUtf8(data), rows, error))
+    return false;
+  if (rows.isEmpty()) {
+    error=QObject::tr("RadioID CSV is empty.");
+    return false;
+  }
+
+  const QStringList header=rows.first();
+  QHash<QString, int> columns;
+  for (int index=0; index<header.size(); ++index)
+    columns.insert(normalizeHeader(header[index]), index);
+  auto column=[&](const QString &name) { return columns.value(name, -1); };
+  const int idColumn=columns.contains(QStringLiteral("radio id"))
+      ? column(QStringLiteral("radio id")) : column(QStringLiteral("dmr id"));
+  const int callColumn=column(QStringLiteral("callsign"));
+  if ((idColumn < 0) || (callColumn < 0)) {
+    error=QObject::tr("RadioID CSV must contain 'Radio ID' and 'Callsign' columns.");
+    return false;
+  }
+
+  users.clear();
+  for (int rowIndex=1; rowIndex<rows.size(); ++rowIndex) {
+    QStringList fields=rows[rowIndex];
+    if (fields.size() > header.size()) {
+      error=QObject::tr("RadioID CSV row %1 has more fields than the header.").arg(rowIndex+1);
+      return false;
+    }
+    while (fields.size() < header.size())
+      fields.append(QString());
+    bool idValid=false;
+    const uint id=fields[idColumn].trimmed().toUInt(&idValid);
+    if (!idValid || (0 == id) || (id > 0xffffff)) {
+      error=QObject::tr("RadioID CSV row %1 has an invalid 24-bit Radio ID.").arg(rowIndex+1);
+      return false;
+    }
+
+    auto value=[&](const QString &name) {
+      const int index=column(name);
+      return (index < 0) ? QString() : fields[index].trimmed();
+    };
+    UserDatabase::User user;
+    user.id=id;
+    user.call=fields[callColumn].trimmed();
+    user.name=value(QStringLiteral("name"));
+    user.surname=value(QStringLiteral("nickname"));
+    user.city=value(QStringLiteral("city"));
+    user.state=value(QStringLiteral("state"));
+    user.country=value(QStringLiteral("country"));
+    user.comment=value(QStringLiteral("remarks"));
+    users.append(user);
+  }
+  if (users.isEmpty()) {
+    error=QObject::tr("RadioID CSV does not contain any user records.");
+    return false;
+  }
+  return true;
+}
+}
 
 
 /* ********************************************************************************************* *
@@ -141,6 +277,18 @@ UserDatabase::parse(const QString &filename, QList<User> &users)
   }
   QByteArray data = file.readAll();
   file.close();
+
+  if (QStringLiteral("csv").compare(QFileInfo(filename).suffix(), Qt::CaseInsensitive) == 0) {
+    QString errorMessage;
+    if (!parseRadioIdCSV(data, users, errorMessage)) {
+      const QString msg=QString("Failed to load call-sign CSV: %1").arg(errorMessage);
+      logError() << msg;
+      emit error(msg);
+      return false;
+    }
+    logDebug() << "Loaded user database with " << users.size() << " entries from " << filename << ".";
+    return true;
+  }
 
   QJsonParseError err;
   QJsonDocument doc = QJsonDocument::fromJson(data, &err);

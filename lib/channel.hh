@@ -434,6 +434,8 @@ class DMRChannel: public DigitalChannel
   Q_PROPERTY(CommercialChannelExtension* commercial READ commercialExtension WRITE setCommercialExtension)
   /** The AnyTone DMR channel extension. */
   Q_PROPERTY(AnytoneDMRChannelExtension* anytone READ anytoneChannelExtension WRITE setAnytoneChannelExtension)
+  /** The Baofeng DM-1702S channel extension. */
+  Q_PROPERTY(DM1702SChannelExtension* dm1702s READ dm1702sChannelExtension WRITE setDM1702SChannelExtension)
 
 public:
   /** Possible admit criteria of digital channels. */
@@ -532,6 +534,9 @@ public:
   /** Sets the AnyTone DMR channel extension. */
   void setAnytoneChannelExtension(AnytoneDMRChannelExtension *ext);
 
+  DM1702SChannelExtension *dm1702sChannelExtension() const;
+  void setDM1702SChannelExtension(DM1702SChannelExtension *ext);
+
 public:
   YAML::Node serialize(const Context &context, const ErrorStack &err=ErrorStack());
 
@@ -559,6 +564,8 @@ protected:
   CommercialChannelExtension *_commercialExtension;
   /** Owns the AnyTone DMR channel extension. */
   AnytoneDMRChannelExtension *_anytoneExtension;
+  /** Owns the Baofeng DM-1702S channel extension. */
+  DM1702SChannelExtension *_dm1702sExtension;
 };
 
 

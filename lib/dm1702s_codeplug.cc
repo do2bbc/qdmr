@@ -114,6 +114,20 @@ QString readLatin1(const QByteArray &data, size_t offset, size_t maxLength) {
   return QString::fromLatin1(data.constData()+offset, static_cast<int>(length));
 }
 
+bool writeBootMessage(QByteArray &page, size_t offset, const QString &message,
+                      const ErrorStack &err) {
+  const QByteArray encoded=message.toLatin1();
+  if ((QString::fromLatin1(encoded) != message) || (encoded.size() > 16) ||
+      encoded.contains('\0') || encoded.contains(static_cast<char>(0xff))) {
+    errMsg(err) << "DM1702S boot messages must contain at most 16 Latin-1 bytes.";
+    return false;
+  }
+  std::memset(page.data()+offset, 0, 16);
+  if (!encoded.isEmpty())
+    std::memcpy(page.data()+offset, encoded.constData(), static_cast<size_t>(encoded.size()));
+  return true;
+}
+
 bool readBCD24Frequency(const QByteArray &data, size_t offset, Frequency &frequency,
                         const ErrorStack &err) {
   if (offset+3 > static_cast<size_t>(data.size())) {
@@ -172,7 +186,19 @@ public:
   }
 
   bool loneWorkerEnabled() const override {
-    return getBit(0x18, 2);
+    return getBit(0x18, 3);
+  }
+
+  void enableLoneWorker(bool enable) override {
+    setBit(0x18, 3, enable);
+  }
+
+  bool autoStartScanEnabled() const {
+    return getBit(0x19, 7);
+  }
+
+  void enableAutoStartScan(bool enable) {
+    setBit(0x19, 7, enable);
   }
 
   FMChannel::Bandwidth bandwidth() const override {
@@ -203,8 +229,24 @@ public:
     return getBit(0x1b, 7);
   }
 
-  bool emergencyACKEnabled() const override {
+  void enableEmergencyNotification(bool enable) override {
+    setBit(0x1b, 7, enable);
+  }
+
+  bool emergencyCallIndicationEnabled() const {
     return getBit(0x1b, 6);
+  }
+
+  void enableEmergencyCallIndication(bool enable) {
+    setBit(0x1b, 6, enable);
+  }
+
+  bool emergencyACKEnabled() const override {
+    return getBit(0x1b, 5);
+  }
+
+  void enableEmergencyACK(bool enable) override {
+    setBit(0x1b, 5, enable);
   }
 
   bool validEmergencySystemIndex() const override {
@@ -215,8 +257,20 @@ public:
     return getUInt4(0x1b, 0)-1;
   }
 
+  void setEmergencySystemIndex(unsigned int index) override {
+    setUInt4(0x1b, 0, static_cast<uint8_t>(index+1));
+  }
+
+  void clearEmergencySystemIndex() override {
+    setUInt4(0x1b, 0, 0);
+  }
+
   bool rxOnlyEnabled() const override {
     return getBit(0x18, 5);
+  }
+
+  void enableRXOnly(bool enable) override {
+    setBit(0x18, 5, enable);
   }
 
   bool privateCallACKEnabled() const override {
@@ -270,7 +324,8 @@ public:
 }
 
 DM1702SCodeplug::DM1702SCodeplug(QObject *parent)
-  : Codeplug(parent), _pages(), _pageAddresses(), _originalChannelNames(), _originalRadioAlias(),
+  : Codeplug(parent), _pages(), _pageAddresses(), _originalChannelNames(),
+    _originalBootMessage1(), _originalBootMessage2(), _originalRadioAlias(),
     _originalAprsEnabled(false),
     _originalDataTransmitServer(DM1702SSettingsExtension::DataTransmitServer::HyteraDefinedData),
     _originalVfoARXFrequency(), _originalVfoATXFrequency(), _originalVfoBRXFrequency(),
@@ -288,6 +343,11 @@ DM1702SCodeplug::clearPages() {
   _originalChannelContactIndexes.clear();
   _originalChannelGPSIndexes.clear();
   _originalChannelScanListIndexes.clear();
+  _originalChannelRXFrequencies.clear();
+  _originalChannelTXFrequencies.clear();
+  _originalChannelFlags18.clear();
+  _originalChannelFlags19.clear();
+  _originalChannelEmergencySettings.clear();
   _originalContacts.clear();
   _originalRXGroupOffsets.clear();
   _originalRXGroupNames.clear();
@@ -300,6 +360,8 @@ DM1702SCodeplug::clearPages() {
   _originalZoneAMembers.clear();
   _originalZoneBMembers.clear();
   _originalGPSSystemNames.clear();
+  _originalBootMessage1.clear();
+  _originalBootMessage2.clear();
   _originalRadioAlias.clear();
   _originalAprsEnabled = false;
   _originalDataTransmitServer = DM1702SSettingsExtension::DataTransmitServer::HyteraDefinedData;
@@ -576,6 +638,10 @@ DM1702SCodeplug::decode(Config *config, const ErrorStack &err) {
     ++aliasLength;
   _originalRadioAlias = QString::fromLatin1(settingsPage.constData()+0x1d0,
                                              static_cast<int>(aliasLength));
+  _originalBootMessage1=readLatin1(settingsPage, 0x180, 16);
+  _originalBootMessage2=readLatin1(settingsPage, 0x1c0, 16);
+  config->settings()->boot()->setMessage1(_originalBootMessage1);
+  config->settings()->boot()->setMessage2(_originalBootMessage2);
   _originalAprsEnabled = 0 != (static_cast<uint8_t>(settingsPage[0x44]) & 0x01);
   _originalDataTransmitServer = (0 != (static_cast<uint8_t>(settingsPage[0x700]) & 0x01))
       ? DM1702SSettingsExtension::DataTransmitServer::MOTOIP
@@ -605,6 +671,11 @@ DM1702SCodeplug::decode(Config *config, const ErrorStack &err) {
   _originalChannelContactIndexes.clear();
   _originalChannelGPSIndexes.clear();
   _originalChannelScanListIndexes.clear();
+  _originalChannelRXFrequencies.clear();
+  _originalChannelTXFrequencies.clear();
+  _originalChannelFlags18.clear();
+  _originalChannelFlags19.clear();
+  _originalChannelEmergencySettings.clear();
   for (size_t index=0; index<channelCount; ++index) {
     const QString name = readChannelName(channelNames, index);
     if (name.isEmpty()) {
@@ -621,6 +692,23 @@ DM1702SCodeplug::decode(Config *config, const ErrorStack &err) {
     if (nullptr == channel) {
       errMsg(err) << "Cannot decode DM1702S channel " << (index+1) << ".";
       return false;
+    }
+    _originalChannelEmergencySettings.append(record[0x1b]);
+    _originalChannelRXFrequencies.append(channel->rxFrequency());
+    _originalChannelTXFrequencies.append(channel->txFrequency());
+    _originalChannelFlags18.append(record[0x18]);
+    _originalChannelFlags19.append(record[0x19]);
+    if (DMRChannel *dmr=channel->as<DMRChannel>()) {
+      if (nullptr == dmr->dm1702sChannelExtension())
+        dmr->setDM1702SChannelExtension(new DM1702SChannelExtension());
+      DM1702SChannelExtension *extension=dmr->dm1702sChannelExtension();
+      extension->enableAutoStartScan(element.autoStartScanEnabled());
+      extension->enableEmergencyAlarmIndication(element.emergencyNotificationEnabled());
+      extension->enableEmergencyCallIndication(element.emergencyCallIndicationEnabled());
+      extension->enableEmergencyAlarmAck(element.emergencyACKEnabled());
+      extension->setEmergencySystem(element.validEmergencySystemIndex()
+          ? static_cast<DM1702SChannelExtension::EmergencySystem>(element.emergencySystemIndex()+1)
+          : DM1702SChannelExtension::EmergencySystem::None);
     }
     config->channelList()->add(channel);
     int scanListIndex=-1;
@@ -759,8 +847,13 @@ DM1702SCodeplug::encode(Config *config, const Flags &flags, const ErrorStack &er
     errMsg(err) << "Changing the number of DM1702S channels is not supported yet.";
     return false;
   }
-  if (_originalChannelContactIndexes.size() != config->channelList()->count()) {
-    errMsg(err) << "DM1702S source has incomplete channel TX-contact mappings.";
+    if ((_originalChannelContactIndexes.size() != config->channelList()->count()) ||
+      (_originalChannelEmergencySettings.size() != config->channelList()->count()) ||
+      (_originalChannelRXFrequencies.size() != config->channelList()->count()) ||
+      (_originalChannelTXFrequencies.size() != config->channelList()->count()) ||
+      (_originalChannelFlags18.size() != config->channelList()->count()) ||
+      (_originalChannelFlags19.size() != config->channelList()->count())) {
+    errMsg(err) << "DM1702S source has incomplete channel mappings.";
     return false;
   }
   if ((_originalChannelScanListIndexes.size() != config->channelList()->count()) ||
@@ -864,6 +957,8 @@ DM1702SCodeplug::encode(Config *config, const Flags &flags, const ErrorStack &er
   normalized.settings()->dm1702sExtension()->setVfoATXFrequency(_originalVfoATXFrequency);
   normalized.settings()->dm1702sExtension()->setVfoBRXFrequency(_originalVfoBRXFrequency);
   normalized.settings()->dm1702sExtension()->setVfoBTXFrequency(_originalVfoBTXFrequency);
+  normalized.settings()->boot()->setMessage1(_originalBootMessage1);
+  normalized.settings()->boot()->setMessage2(_originalBootMessage2);
   for (int index=0; index<_originalGPSSystemNames.size(); ++index) {
     auto *system=normalized.posSystems()->system(index)->as<DMRAPRSSystem>();
     if (nullptr == system) {
@@ -948,10 +1043,29 @@ DM1702SCodeplug::encode(Config *config, const Flags &flags, const ErrorStack &er
     Channel *copyChannel=normalized.channelList()->channel(index);
     auto *sourceDMR=sourceChannel->as<DMRChannel>();
     auto *copyDMR=copyChannel->as<DMRChannel>();
+    copyChannel->setRXFrequency(_originalChannelRXFrequencies[index]);
+    copyChannel->setTXFrequency(_originalChannelTXFrequencies[index]);
+    copyChannel->setRXOnly(0 != (_originalChannelFlags18[index] & 0x20));
     if (sourceDMR && copyDMR) {
       const int originalGPSIndex=_originalChannelGPSIndexes[index];
       copyDMR->setAPRS((originalGPSIndex < 0) ? nullptr :
           normalized.posSystems()->system(originalGPSIndex));
+      const uint8_t emergencySettings=_originalChannelEmergencySettings[index];
+        if (nullptr == copyDMR->dm1702sChannelExtension()) {
+        errMsg(err) << "DM1702S channel " << (index+1) << " is missing its radio-specific settings.";
+        return false;
+        }
+        copyDMR->dm1702sChannelExtension()->enableEmergencyAlarmIndication(
+          0 != (emergencySettings & 0x80));
+        copyDMR->dm1702sChannelExtension()->enableEmergencyCallIndication(
+          0 != (emergencySettings & 0x40));
+        copyDMR->dm1702sChannelExtension()->enableEmergencyAlarmAck(
+          0 != (emergencySettings & 0x20));
+        copyDMR->dm1702sChannelExtension()->setEmergencySystem(
+          static_cast<DM1702SChannelExtension::EmergencySystem>(emergencySettings & 0x0f));
+        copyDMR->extended()->enableLoneWorker(0 != (_originalChannelFlags18[index] & 0x08));
+        copyDMR->dm1702sChannelExtension()->enableAutoStartScan(
+          0 != (_originalChannelFlags19[index] & 0x80));
     }
     if (sourceChannel->scanList()) {
       int scanListIndex=-1;
@@ -1099,6 +1213,23 @@ DM1702SCodeplug::encode(Config *config, const Flags &flags, const ErrorStack &er
     }
     const size_t offset=static_cast<size_t>(index)*channelRecordSize;
     DM1702SChannelElement element(reinterpret_cast<uint8_t *>(channelData.data()+offset));
+    DM1702SChannelExtension *extension=channel->dm1702sChannelExtension();
+    if (nullptr == extension) {
+      errMsg(err) << "DM1702S channel " << (index+1) << " is missing its radio-specific settings.";
+      return false;
+    }
+    if (channel->rxOnly() && extension->emergencyCallIndication()) {
+      errMsg(err) << "DM1702S RX-only channels cannot enable Emergency Call Indication.";
+      return false;
+    }
+    element.setRXFrequency(channel->rxFrequency());
+    if (channel->txFrequency().isZero())
+      element.clearTXFrequency();
+    else
+      element.setTXFrequency(channel->txFrequency());
+    element.enableRXOnly(channel->rxOnly());
+    element.enableLoneWorker(channel->extended()->loneWorker());
+    element.enableAutoStartScan(extension->autoStartScan());
     const int scanListIndex=config->scanlists()->indexOf(channel->scanList());
     if (channel->scanList()) {
       if ((scanListIndex < 0) || (scanListIndex >= 32)) {
@@ -1110,6 +1241,14 @@ DM1702SCodeplug::encode(Config *config, const Flags &flags, const ErrorStack &er
       element.clearScanListIndex();
     }
     element.setDMRAPRSChannelIndex(gpsPosition);
+    element.enableEmergencyNotification(extension->emergencyAlarmIndication());
+    element.enableEmergencyCallIndication(extension->emergencyCallIndication());
+    element.enableEmergencyACK(extension->emergencyAlarmAck());
+    if (DM1702SChannelExtension::EmergencySystem::None == extension->emergencySystem())
+      element.clearEmergencySystemIndex();
+    else
+      element.setEmergencySystemIndex(
+          static_cast<unsigned int>(extension->emergencySystem())-1);
   }
 
   constexpr size_t scanListRecordSize=0x39;
@@ -1283,6 +1422,10 @@ DM1702SCodeplug::encode(Config *config, const Flags &flags, const ErrorStack &er
     errMsg(err) << "Missing or invalid DM1702S settings page.";
     return false;
   }
+  QByteArray bootMessages(0x50, '\0');
+  if (!writeBootMessage(bootMessages, 0, config->settings()->boot()->message1(), err) ||
+      !writeBootMessage(bootMessages, 0x40, config->settings()->boot()->message2(), err))
+    return false;
   const QByteArray date = QDate::currentDate().toString(QStringLiteral("yyyy-MM-dd")).toLatin1();
   if (10 != date.size()) {
     errMsg(err) << "Cannot encode the current date for DM1702S.";
@@ -1312,6 +1455,8 @@ DM1702SCodeplug::encode(Config *config, const Flags &flags, const ErrorStack &er
   if (!writeRanges(_pages, rxListRanges, rxListData, err))
     return false;
   _pages[0x78]=vfoPage;
+  std::memcpy(settingsPage->data()+0x180, bootMessages.constData(), 16);
+  std::memcpy(settingsPage->data()+0x1c0, bootMessages.constData()+0x40, 16);
   std::memcpy(settingsPage->data()+0x10, date.constData(), date.size());
   std::memset(settingsPage->data()+0x1d0, 0, 16);
   std::memcpy(settingsPage->data()+0x1d0, radioAlias.constData(), radioAlias.size());

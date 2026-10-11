@@ -15,16 +15,16 @@
 
 %define ext_man .gz
 %define sover   0
-%define realver 0.14.0
+%define realver 0.15.2
 Name:           qdmr
 Version:        %{realver}
-Release:        0fedora
+Release:        %{?beta_release}%{!?beta_release:0fedora}
 Summary:        Graphical code-plug programming tool for DMR radios
 License:        GPL-3.0-or-later
 Group:          Productivity/Hamradio/Other
 URL:            https://dm3mat.darc.de/qdmr/
 #Git-Clone:     https://github.com/hmatuschek/qdmr.git
-Source:         https://github.com/hmatuschek/qdmr/archive/refs/tags/v%{realver}.tar.gz
+Source:         https://github.com/hmatuschek/qdmr/archive/refs/tags/v%{realver}%{?beta_suffix}.tar.gz
 BuildRequires:  cmake
 BuildRequires:  docbook5-style-xsl
 BuildRequires:  xsltproc
@@ -33,6 +33,8 @@ BuildRequires:  hicolor-icon-theme
 BuildRequires:  librsvg2-tools
 BuildRequires:  pkgconfig
 BuildRequires:  pkgconfig(Qt6Core)
+BuildRequires:  pkgconfig(Qt6Concurrent)
+BuildRequires:  pkgconfig(Qt6Multimedia)
 BuildRequires:  pkgconfig(Qt6Network)
 BuildRequires:  pkgconfig(Qt6Positioning)
 BuildRequires:  pkgconfig(Qt6SerialPort)
@@ -56,6 +58,7 @@ Currently supported devices are:
  * Open GD77 firmware (GD77, RD-5R, DM-1801, MD-UV390, RT-3S & DM1701)
  * AnyTone AT-D868UVE, AT-D878UV, AT-878UVII, AT-D578UV, AT-D578UVII
  * BTech DMR-6X2, DMR-6X2PRO, DM-1701, DR-1801UVA6, DM-32UV
+ * Baofeng DM-1702S and Retevis RT72
 
 %package -n libdmrconf%{sover}
 Summary:        Graphical code-plug programming tool for DMR radios
@@ -80,7 +83,7 @@ This subpackage contains libraries and header files for developing
 applications that want to make use of libdmrconf.
 
 %prep
-%setup -q -n %{name}-%{realver}
+%setup -q -n %{name}-%{realver}%{?beta_suffix}
 
 %build
 %cmake -DBUILD_MAN=ON -DDOCBOOK2MAN_XSLT=docbook_man.fedora.xsl -DINSTALL_UDEV_PATH=%{_udevrulesdir}
@@ -112,6 +115,9 @@ applications that want to make use of libdmrconf.
 %{_libdir}/libdmrconf.so
 
 %changelog
+* Sun Oct 11 2026 Hannes Matuschek <dm3mat@darc.de>
+  - Updated to 0.15.2
+  - Added DM-1702S/RT72 contact database read, import and upload support
 * Sat Mar 21 2026 Hannes Matuschek <dm3mat@darc.de>
   - Updated to 0.14.0
 * Sun Nov 30 2025 Hannes Matuschek <dm3mat@darc.de>

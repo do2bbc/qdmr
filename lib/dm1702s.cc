@@ -1,13 +1,24 @@
 #include "dm1702s.hh"
 
+#include "dm1702s_callsigndb.hh"
 #include "dm1702s_interface.hh"
 #include "logger.hh"
 #include "radiolimits.hh"
 
+#include <algorithm>
 #include <QMap>
 #include <QSet>
 
 namespace {
+class DM1702SRadioLimits final : public RadioLimits {
+public:
+  DM1702SRadioLimits() : RadioLimits(true) {
+    _hasCallSignDB = true;
+    _callSignDBImplemented = true;
+    _numCallSignDBEntries = DM1702SCallsignDB::maxEntries();
+  }
+};
+
 constexpr uint8_t pageReadOrder[] = {
   0x02, 0x16, 0x24, 0x04, 0x45, 0x7c, 0x11, 0x03, 0x7b, 0x13, 0x12, 0x06,
   0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f, 0x20, 0x21, 0x22,
@@ -50,7 +61,7 @@ DM1702S::name() const {
 const RadioLimits &
 DM1702S::limits() const {
   if (nullptr == _limits)
-    _limits = new RadioLimits(true);
+    _limits = new DM1702SRadioLimits();
   return *_limits;
 }
 
@@ -69,6 +80,22 @@ DM1702S::startDownload(const TransferFlags &flags, const ErrorStack &err) {
   if ((StatusIdle != _task) || (nullptr == _device))
     return false;
   _task = StatusDownload;
+  _errorStack = err;
+  if (flags.blocking()) {
+    run();
+    return StatusIdle == _task;
+  }
+  if (_device->isOpen())
+    _device->moveToThread(this);
+  start();
+  return true;
+}
+
+bool
+DM1702S::startDownloadCallsignDB(const TransferFlags &flags, const ErrorStack &err) {
+  if ((StatusIdle != _task) || (nullptr == _device))
+    return false;
+  _task = StatusDownloadCallsigns;
   _errorStack = err;
   if (flags.blocking()) {
     run();
@@ -101,10 +128,30 @@ DM1702S::startUpload(Config *config, const Codeplug::Flags &flags, const ErrorSt
 bool
 DM1702S::startUploadCallsignDB(UserDatabase *db, const CallsignDB::Flags &selection,
                                const ErrorStack &err) {
-  Q_UNUSED(db)
-  Q_UNUSED(selection)
-  errMsg(err) << "DM1702S callsign database upload is not implemented.";
-  return false;
+  if ((StatusIdle != _task) || (nullptr == _device) || (nullptr == db))
+    return false;
+
+  unsigned int count=static_cast<unsigned int>(std::min<qint64>(
+      DM1702SCallsignDB::maxEntries(), db->count()));
+  if (selection.hasCountLimit())
+    count=static_cast<unsigned int>(std::min<size_t>(count, selection.countLimit()));
+  QVector<UserDatabase::User> users;
+  users.reserve(static_cast<int>(count));
+  for (unsigned int index=0; index<count; ++index)
+    users.append(db->user(static_cast<int>(index)));
+  if (!DM1702SCallsignDB::encode(users, _callSignDatabase, err))
+    return false;
+
+  _task = StatusUploadCallsigns;
+  _errorStack = err;
+  if (selection.blocking()) {
+    run();
+    return StatusIdle == _task;
+  }
+  if (_device->isOpen())
+    _device->moveToThread(this);
+  start();
+  return true;
 }
 
 bool
@@ -188,6 +235,42 @@ DM1702S::download(const ErrorStack &err) {
 }
 
 bool
+DM1702S::downloadCallsignDatabase(const ErrorStack &err) {
+  if (!_device->read_start(0, 0, err)) {
+    errMsg(err) << "Cannot enter DM1702S call-sign database read mode.";
+    return false;
+  }
+
+  const uint32_t address=DM1702SCallsignDB::address();
+  const uint32_t lastAddress=address+DM1702SCallsignDB::imageSize()-1;
+  if (lastAddress > 0xffffff) {
+    errMsg(err) << "DM1702S call-sign database exceeds the 24-bit address space.";
+    return false;
+  }
+
+  QByteArray image(static_cast<int>(DM1702SCallsignDB::imageSize()), '\0');
+  constexpr int chunkSize=0x1000;
+  for (int offset=0; offset<image.size(); offset+=chunkSize) {
+    const int length=std::min(chunkSize, static_cast<int>(image.size())-offset);
+    if (!_device->read(0, address+offset,
+                       reinterpret_cast<uint8_t *>(image.data()+offset), length, err)) {
+      errMsg(err) << "Cannot read DM1702S call-sign database at "
+                  << Qt::hex << (address+offset) << ".";
+      return false;
+    }
+    emit downloadProgress((99*(offset+length))/image.size());
+  }
+  if (!_device->read_finish(err)) {
+    errMsg(err) << "Cannot finish DM1702S call-sign database read.";
+    return false;
+  }
+  if (!DM1702SCallsignDB::decodeToJson(image, _downloadedCallsignDatabaseJson, err))
+    return false;
+  emit downloadProgress(100);
+  return true;
+}
+
+bool
 DM1702S::upload(const ErrorStack &err) {
   if (!download(err)) {
     errMsg(err) << "Cannot preserve existing DM1702S codeplug before upload.";
@@ -242,17 +325,40 @@ DM1702S::upload(const ErrorStack &err) {
   return _device->write_finish(err);
 }
 
+bool
+DM1702S::uploadCallsignDatabase(const ErrorStack &err) {
+  if (!_device->read_start(0, 0, err)) {
+    errMsg(err) << "Cannot enter DM1702S call-sign database write mode.";
+    return false;
+  }
+  if (!_device->write_start(0, 0, err))
+    return false;
+  if (!_device->write(0, DM1702SCallsignDB::address(),
+                      reinterpret_cast<uint8_t *>(_callSignDatabase.data()),
+                      _callSignDatabase.size(), err)) {
+    errMsg(err) << "Cannot write DM1702S call-sign database.";
+    return false;
+  }
+  emit uploadProgress(100);
+  return _device->write_finish(err);
+}
+
 void
 DM1702S::run() {
-  if ((StatusDownload != _task) && (StatusUpload != _task))
+  if ((StatusDownload != _task) && (StatusUpload != _task) &&
+  (StatusDownloadCallsigns != _task) && (StatusUploadCallsigns != _task))
     return;
+  const Status task=_task;
   if (!_device || !_device->isOpen()) {
     _task = StatusError;
-    emit downloadError(this);
+    if ((StatusDownload == task) || (StatusDownloadCallsigns == task))
+      emit downloadError(this);
+    else
+      emit uploadError(this);
     return;
   }
 
-  if (StatusDownload == _task) {
+  if (StatusDownload == task) {
     emit downloadStarted();
     if (!download(_errorStack)) {
       _device->read_finish();
@@ -264,9 +370,33 @@ DM1702S::run() {
     _task = StatusIdle;
     _device->close();
     emit downloadFinished(this, &codeplug());
-  } else {
+  } else if (StatusDownloadCallsigns == task) {
+    emit downloadStarted();
+    if (!downloadCallsignDatabase(_errorStack)) {
+      _device->read_finish();
+      _device->close();
+      _task = StatusError;
+      emit downloadError(this);
+      return;
+    }
+    _task = StatusIdle;
+    _device->close();
+    emit downloadCallsignDBFinished(this, _downloadedCallsignDatabaseJson);
+  } else if (StatusUpload == task) {
     emit uploadStarted();
     if (!upload(_errorStack)) {
+      _device->write_finish();
+      _device->close();
+      _task = StatusError;
+      emit uploadError(this);
+      return;
+    }
+    _task = StatusIdle;
+    _device->close();
+    emit uploadComplete(this);
+  } else {
+    emit uploadStarted();
+    if (!uploadCallsignDatabase(_errorStack)) {
       _device->write_finish();
       _device->close();
       _task = StatusError;

@@ -291,6 +291,96 @@
         <translation>Gelesen</translation>
     </message>
     <message>
+        <location filename="../src/application.cc" line="530"/>
+        <source>Read codeplug</source>
+        <translation>Codeplug lesen</translation>
+    </message>
+    <message>
+        <location filename="../src/application.cc" line="548"/>
+        <source>Cannot read call-sign DB.</source>
+        <translation>Rufzeichendatenbank kann nicht gelesen werden.</translation>
+    </message>
+    <message>
+        <location filename="../src/application.cc" line="549"/>
+        <source>The detected radio &apos;%1&apos; does not support call-sign database download.</source>
+        <translation>Das erkannte Funkgerät &apos;%1&apos; unterstützt das Auslesen der Rufzeichendatenbank nicht.</translation>
+    </message>
+    <message>
+        <location filename="../src/application.cc" line="563"/>
+        <source>Read call-sign DB</source>
+        <translation>Rufzeichendatenbank lesen</translation>
+    </message>
+    <message>
+        <location filename="../src/application.cc" line="577"/>
+        <source>Import call-sign database</source>
+        <translation>Rufzeichendatenbank importieren</translation>
+    </message>
+    <message>
+        <location filename="../src/application.cc" line="578"/>
+        <source>User database JSON (*.json);;RadioID/LContact CSV (*.csv)</source>
+        <translation>Benutzerdatenbank JSON (*.json);;RadioID-/LContact-CSV (*.csv)</translation>
+    </message>
+    <message>
+        <location filename="../src/application.cc" line="590"/>
+        <source>Cannot import call-sign database</source>
+        <translation>Rufzeichendatenbank kann nicht importiert werden</translation>
+    </message>
+    <message>
+        <location filename="../src/application.cc" line="592"/>
+        <source>Cannot import call-sign database from &apos;%1&apos;.</source>
+        <translation>Rufzeichendatenbank kann nicht aus &apos;%1&apos; importiert werden.</translation>
+    </message>
+    <message>
+        <location filename="../src/application.cc" line="599"/>
+        <source>Loaded %1 call-sign entries for this session.</source>
+        <translation>%1 Rufzeicheneinträge für diese Sitzung geladen.</translation>
+    </message>
+    <message>
+        <location filename="../src/application.cc" line="642"/>
+        <source>Call-sign DB read error</source>
+        <translation>Fehler beim Lesen der Rufzeichendatenbank</translation>
+    </message>
+    <message>
+        <location filename="../src/application.cc" line="653"/>
+        <source>Save call-sign database</source>
+        <translation>Rufzeichendatenbank speichern</translation>
+    </message>
+    <message>
+        <location filename="../src/application.cc" line="655"/>
+        <source>User database JSON (*.json)</source>
+        <translation>Benutzerdatenbank JSON (*.json)</translation>
+    </message>
+    <message>
+        <location filename="../src/application.cc" line="661"/>
+        <source>Cannot save call-sign database</source>
+        <translation>Rufzeichendatenbank kann nicht gespeichert werden</translation>
+    </message>
+    <message>
+        <location filename="../src/application.cc" line="662"/>
+        <source>Cannot save call-sign database to &apos;%1&apos;: %2</source>
+        <translation>Rufzeichendatenbank kann nicht unter &apos;%1&apos; gespeichert werden: %2</translation>
+    </message>
+    <message>
+        <location filename="../src/application.cc" line="666"/>
+        <source>Call-sign DB saved</source>
+        <translation>Rufzeichendatenbank gespeichert</translation>
+    </message>
+    <message>
+        <location filename="../src/application.cc" line="696"/>
+        <source>Write codeplug</source>
+        <translation>Codeplug schreiben</translation>
+    </message>
+    <message>
+        <location filename="../src/application.cc" line="773"/>
+        <source>Write call-sign db</source>
+        <translation>Rufzeichendatenbank schreiben</translation>
+    </message>
+    <message>
+        <location filename="../src/application.cc" line="862"/>
+        <source>Write satellites</source>
+        <translation>Satellitenkonfiguration schreiben</translation>
+    </message>
+    <message>
         <location filename="../src/application.cc" line="630"/>
         <source>Upload ...</source>
         <translation>Schreibe …</translation>
@@ -2764,6 +2854,26 @@ Label for a checkbox enabling the call-reset tone.</extracomment>
         <location filename="../src/mainwindow.ui" line="302"/>
         <source>Refreshes the downloaded callsign DB</source>
         <translation>Aktualisiert die lokale Rufzeichendatenbank im Hintergrund aus den Onlinequellen.</translation>
+    </message>
+    <message>
+        <location filename="../src/mainwindow.ui" line="249"/>
+        <source>Read Call-sign DB ...</source>
+        <translation>Rufzeichendatenbank lesen ...</translation>
+    </message>
+    <message>
+        <location filename="../src/mainwindow.ui" line="252"/>
+        <source>Reads the call-sign database from a supported radio and saves it as users.json.</source>
+        <translation>Liest die Rufzeichendatenbank aus einem unterstützten Funkgerät und speichert sie als users.json.</translation>
+    </message>
+    <message>
+        <location filename="../src/mainwindow.ui" line="323"/>
+        <source>Import Call-sign DB ...</source>
+        <translation>Rufzeichendatenbank importieren ...</translation>
+    </message>
+    <message>
+        <location filename="../src/mainwindow.ui" line="326"/>
+        <source>Loads a users.json call-sign list for upload during this session.</source>
+        <translation>Lädt eine Rufzeichenliste aus users.json für den Upload in dieser Sitzung.</translation>
     </message>
     <message>
         <location filename="../src/mainwindow.ui" line="310"/>

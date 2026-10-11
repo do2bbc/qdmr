@@ -76,7 +76,6 @@ class DMRChannelExtension: public ChannelExtension
   Q_PROPERTY(bool dcdm READ dcdm WRITE enableDCDM)
   /** If @c true, the lone-worker feature is enabled for this channel. */
   Q_PROPERTY(bool loneWorker READ loneWorker WRITE enableLoneWorker)
-
 public:
   /** Default constructor. */
   explicit DMRChannelExtension(QObject *parent=nullptr);
@@ -112,7 +111,6 @@ public:
   bool loneWorker() const;
   /** Enables the lone-worker feature for this channel. */
   void enableLoneWorker(bool enable);
-
 protected:
   /** If @c true, the call confirmation is enabled. */
   bool _callConfirm;
@@ -126,7 +124,54 @@ protected:
   bool _dcdm;
   /** If @c true the lone-worker feature is enabled. */
   bool _loneWorker;
+};
 
+
+/** DM-1702S-specific DMR channel settings. */
+class DM1702SChannelExtension: public ConfigExtension
+{
+  Q_OBJECT
+
+  Q_CLASSINFO("autoStartScanDescription", "Starts scanning automatically when this channel is selected.")
+  Q_PROPERTY(bool autoStartScan READ autoStartScan WRITE enableAutoStartScan)
+  Q_CLASSINFO("emergencyAlarmIndicationDescription", "Enables emergency alarm indication.")
+  Q_PROPERTY(bool emergencyAlarmIndication READ emergencyAlarmIndication WRITE enableEmergencyAlarmIndication)
+  Q_CLASSINFO("emergencyAlarmAckDescription", "Enables emergency alarm acknowledgement.")
+  Q_PROPERTY(bool emergencyAlarmAck READ emergencyAlarmAck WRITE enableEmergencyAlarmAck)
+  Q_CLASSINFO("emergencyCallIndicationDescription", "Enables emergency call indication.")
+  Q_PROPERTY(bool emergencyCallIndication READ emergencyCallIndication WRITE enableEmergencyCallIndication)
+  Q_CLASSINFO("emergencySystemDescription", "Emergency system selection; None or system 1 through 15.")
+  Q_PROPERTY(EmergencySystem emergencySystem READ emergencySystem WRITE setEmergencySystem)
+
+public:
+  enum class EmergencySystem {
+    None = 0,
+    System1 = 1, System2, System3, System4, System5,
+    System6, System7, System8, System9, System10,
+    System11, System12, System13, System14, System15
+  };
+  Q_ENUM(EmergencySystem)
+
+  Q_INVOKABLE explicit DM1702SChannelExtension(QObject *parent=nullptr);
+  ConfigItem *clone() const override;
+
+  bool autoStartScan() const;
+  void enableAutoStartScan(bool enable);
+  bool emergencyAlarmIndication() const;
+  void enableEmergencyAlarmIndication(bool enable);
+  bool emergencyAlarmAck() const;
+  void enableEmergencyAlarmAck(bool enable);
+  bool emergencyCallIndication() const;
+  void enableEmergencyCallIndication(bool enable);
+  EmergencySystem emergencySystem() const;
+  void setEmergencySystem(EmergencySystem system);
+
+private:
+  bool _autoStartScan;
+  bool _emergencyAlarmIndication;
+  bool _emergencyAlarmAck;
+  bool _emergencyCallIndication;
+  EmergencySystem _emergencySystem;
 };
 
 

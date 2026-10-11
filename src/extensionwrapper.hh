@@ -16,6 +16,7 @@ public:
   explicit ExtensionProxy(QObject *parent=nullptr);
 
 public:
+  void setDM1702SEnabled(bool enabled);
   void setSourceModel(QAbstractItemModel *sourceModel);
 
   int rowCount(const QModelIndex &parent) const;
@@ -31,6 +32,7 @@ public:
 
 protected:
   QHash<int, int> _indexS2P, _indexP2S;
+  bool _dm1702sEnabled;
 };
 
 
