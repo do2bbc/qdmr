@@ -11,7 +11,7 @@ RadioSettings::RadioSettings(QObject *parent)
     _tone(new ToneSettings(this)),
     _gnss(new GNSSSettings(this)), _dmr(new DMRSettings(this)),
     _tytExtension(nullptr), _radioddityExtension(nullptr),
-    _anytoneExtension(nullptr)
+    _anytoneExtension(nullptr), _dm1702sExtension(nullptr)
 {
   connect(_boot, &BootSettings::modified, this, &RadioSettings::modified);
   connect(_audio, &AudioSettings::modified, this, &RadioSettings::modified);
@@ -52,6 +52,7 @@ RadioSettings::clear() {
   setTyTExtension(nullptr);
   setRadioddityExtension(nullptr);
   setAnytoneExtension(nullptr);
+  setDM1702SExtension(nullptr);
 }
 
 Channel::Power
@@ -184,6 +185,25 @@ RadioSettings::setAnytoneExtension(AnytoneSettingsExtension *ext) {
   if (_anytoneExtension) {
     _anytoneExtension->setParent(this);
     connect(_anytoneExtension, SIGNAL(modified(ConfigItem*)), this, SLOT(onExtensionModified()));
+  }
+  emit modified(this);
+}
+
+DM1702SSettingsExtension *
+RadioSettings::dm1702sExtension() const {
+  return _dm1702sExtension;
+}
+
+void
+RadioSettings::setDM1702SExtension(DM1702SSettingsExtension *ext) {
+  if (_dm1702sExtension) {
+    disconnect(_dm1702sExtension, SIGNAL(modified(ConfigItem*)), this, SLOT(onExtensionModified()));
+    _dm1702sExtension->deleteLater();
+  }
+  _dm1702sExtension = ext;
+  if (_dm1702sExtension) {
+    _dm1702sExtension->setParent(this);
+    connect(_dm1702sExtension, SIGNAL(modified(ConfigItem*)), this, SLOT(onExtensionModified()));
   }
   emit modified(this);
 }

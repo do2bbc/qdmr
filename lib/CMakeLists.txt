@@ -48,6 +48,7 @@ qt_add_library(libdmrconf SHARED
   auctus_a6_interface.cc
   dr1801uv.cc dr1801uv_interface.cc dr1801uv_codeplug.cc dr1801uv_filereader.cc dr1801uv_limits.cc
   dm32uv.cc dm32uv_interface.cc dm32uv_limits.cc dm32uv_codeplug.cc dm32uv_callsigndb.cc
+  dm1702s.cc dm1702s_codeplug.cc dm1702s_interface.cc dm1702s_settingsextension.cc
         task_progress.cc
         task_progress.hh)
 
@@ -91,7 +92,8 @@ target_sources(libdmrconf PUBLIC FILE_SET HEADERS
   dmr6x2uv2.hh dmr6x2uv2_codeplug.hh dmr6x2uv2_limits.hh
   auctus_a6_interface.hh
   dr1801uv.hh dr1801uv_interface.hh dr1801uv_codeplug.hh dr1801uv_filereader.hh dr1801uv_limits.hh
-  dm32uv.hh dm32uv_interface.hh dm32uv_limits.hh dm32uv_codeplug.hh dm32uv_callsigndb.hh)
+  dm32uv.hh dm32uv_interface.hh dm32uv_limits.hh dm32uv_codeplug.hh dm32uv_callsigndb.hh
+  dm1702s.hh dm1702s_codeplug.hh dm1702s_interface.hh dm1702s_settingsextension.hh)
 
 
 set_target_properties(libdmrconf PROPERTIES

@@ -9,6 +9,7 @@
 #include "tonesettings.hh"
 #include "gnsssettings.hh"
 #include "dmrsettings.hh"
+#include "dm1702s_settingsextension.hh"
 #include "radioddity_extensions.hh"
 #include "anytone_settingsextension.hh"
 #include "tyt_extensions.hh"
@@ -41,6 +42,8 @@ class RadioSettings : public ConfigItem
   Q_PROPERTY(RadiodditySettingsExtension * radioddity READ radioddityExtension WRITE setRadioddityExtension)
   /** Settings for AnyTone devices. */
   Q_PROPERTY(AnytoneSettingsExtension *anytone READ anytoneExtension WRITE setAnytoneExtension)
+  /** Settings for Baofeng DM-1702S devices. */
+  Q_PROPERTY(DM1702SSettingsExtension *dm1702s READ dm1702sExtension WRITE setDM1702SExtension)
 
 public:
   /** Default constructor. */
@@ -99,6 +102,9 @@ public:
   /** Sets the AnyTone device specific radio settings. */
   void setAnytoneExtension(AnytoneSettingsExtension *ext);
 
+  DM1702SSettingsExtension *dm1702sExtension() const;
+  void setDM1702SExtension(DM1702SSettingsExtension *ext);
+
   bool parse(const YAML::Node &node, Context &ctx, const ErrorStack &err=ErrorStack());
 
 protected:
@@ -131,6 +137,8 @@ protected:
   RadiodditySettingsExtension *_radioddityExtension;
   /** Device specific settings extension for AnyTone devices. */
   AnytoneSettingsExtension *_anytoneExtension;
+  /** Device specific settings extension for DM-1702S devices. */
+  DM1702SSettingsExtension *_dm1702sExtension;
 };
 
 #endif // RADIOCONFIG_HH

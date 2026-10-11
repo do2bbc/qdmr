@@ -12,6 +12,7 @@
 #include "dr1801uv_interface.hh"
 #include "c7000device.hh"
 #include "dm32uv_interface.hh"
+#include "dm1702s_interface.hh"
 
 /* ********************************************************************************************* *
  * Implementation of USBDeviceHandle
@@ -133,6 +134,9 @@ USBDeviceInfo::description() const {
   case Class::C7K:
     stream << "C7000 " << QString::number(_vid,16) << ":" << QString::number(_pid,16);
     break;
+  case Class::Bulk:
+    stream << "USB bulk interface " << QString::number(_vid,16) << ":" << QString::number(_pid,16);
+    break;
   }
   return res;
 }
@@ -200,6 +204,7 @@ USBDeviceDescriptor::isValid() const {
   case Class::DFU:
   case Class::HID:
   case Class::C7K:
+  case Class::Bulk:
     return validRawUSB();
   }
   return false;
@@ -282,6 +287,9 @@ USBDeviceDescriptor::description() const {
   } else if (USBDeviceInfo::Class::C7K == _class) {
     USBDeviceHandle addr = _device.value<USBDeviceHandle>();
     return QString("USB C7000 HT: bus %1, device %2").arg(addr.bus).arg(addr.device);
+  } else if (USBDeviceInfo::Class::Bulk == _class) {
+    USBDeviceHandle addr = _device.value<USBDeviceHandle>();
+    return QString("USB bulk device: bus %1, device %2").arg(addr.bus).arg(addr.device);
   }
   return "Invalid";
 }
@@ -299,6 +307,7 @@ USBDeviceDescriptor::deviceHandle() const {
   case Class::DFU:
   case Class::HID:
   case Class::C7K:
+  case Class::Bulk:
     return QString("%1:%2").arg(_device.value<USBDeviceHandle>().bus)
         .arg(_device.value<USBDeviceHandle>().device);
   case Class::Serial:
@@ -319,6 +328,7 @@ USBDeviceDescriptor::detect(bool saveOnly) {
   res.append(DR1801UVInterface::detect(saveOnly));
   res.append(C7000Device::detect(saveOnly));
   res.append(DM32UVInterface::detect(saveOnly));
+  res.append(DM1702SInterface::detect(saveOnly));
   return res;
 }
 

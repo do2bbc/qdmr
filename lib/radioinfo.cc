@@ -49,7 +49,8 @@ RadioInfo::_radiosByName = QHash<QString, RadioInfo::Radio>{
   {"d578uv2",   RadioInfo::D578UVII},
   {"d168uv",    RadioInfo::D168UV},
   {"dr1801uv",  RadioInfo::DR1801UV},
-  {"dm32uv",    RadioInfo::DM32UV}
+  {"dm32uv",    RadioInfo::DM32UV},
+  {"dm1702s",   RadioInfo::DM1702S}
 };
 
 QHash<unsigned, RadioInfo>
@@ -72,7 +73,9 @@ RadioInfo::_radiosById = QHash<unsigned, RadioInfo>{
   {RadioInfo::DMR6X2UV,  DMR6X2UV::defaultRadioInfo()},
   {RadioInfo::DMR6X2UV2, DMR6X2UV2::defaultRadioInfo()},
   {RadioInfo::DR1801UV,  DR1801UV::defaultRadioInfo()},
-  {RadioInfo::DM32UV,    DM32UV::defaultRadioInfo()}
+  {RadioInfo::DM32UV,    DM32UV::defaultRadioInfo()},
+  {RadioInfo::DM1702S,   RadioInfo(RadioInfo::DM1702S, "dm1702s", "DM-1702S", "Baofeng",
+                                   {USBDeviceInfo(USBDeviceInfo::Class::Bulk, 0x0483, 0x5780, false)})}
 };
 
 

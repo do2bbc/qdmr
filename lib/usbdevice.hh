@@ -126,7 +126,8 @@ public:
     Serial,     ///< Serial port interface class.
     DFU,        ///< DFU interface class.
     HID,        ///< HID (human-interface device) interface class.
-    C7K         ///< Raw USB access to C7000 devices.
+    C7K,        ///< Raw USB access to C7000 devices.
+    Bulk        ///< Raw USB bulk interface.
   };
 
 public:

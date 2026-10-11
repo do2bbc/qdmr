@@ -16,6 +16,8 @@
 #include "md2017.hh"
 #include "dm1701.hh"
 #include "dm32uv.hh"
+#include "dm1702s.hh"
+#include "dm1702s_interface.hh"
 #include "dr1801uv.hh"
 #include "opengd77.hh"
 #include "openuv380.hh"
@@ -250,6 +252,20 @@ Radio::detect(const USBDeviceDescriptor &descr, const RadioInfo &force, const Er
       return nullptr;
     }
     dm32if->deleteLater();
+    return nullptr;
+  } else if ((DM1702SInterface::interfaceInfo() == descr) && force.isValid() &&
+             (RadioInfo::DM1702S == force.id())) {
+    auto dm1702s = new DM1702SInterface(descr, err);
+    if (dm1702s->isOpen()) {
+      RadioInfo id = dm1702s->identifier(err);
+      if (id.isValid() && (RadioInfo::DM1702S == id.id()))
+        return new DM1702S(dm1702s);
+      errMsg(err) << "Cannot identify the selected device as DM1702S.";
+      dm1702s->close();
+      dm1702s->deleteLater();
+      return nullptr;
+    }
+    dm1702s->deleteLater();
     return nullptr;
   }
   return nullptr;
