@@ -53,7 +53,7 @@ as that same page-image format.
 | Contact records and allocation map | Marker `0x0b`, markers `0x28`-`0x2c` | Decoded; contact aliases editable |
 | Channel TX-contact map | Marker `0x27`, first `0x800` bytes | Decoded and editable for stored contacts |
 | RX groups | Marker `0x11` first `0x606` bytes and marker `0x12` first `0x73d` bytes | Decoded; group membership editable |
-| Scan lists | Marker `0x13`; 32 records of `0x39` bytes, names at `+1`, 15 observed channel slots from `+0x1b` | Names, membership and channel default-list links decoded; edits remain unsupported |
+| Scan lists | Marker `0x13`; 32 records of `0x39` bytes, active count in byte 0, names at `+1`, up to 15 one-based channel slots from `+0x1b`; priority channels at `+0x12/+0x13` | Names, membership, priority channels and channel default-list links decoded/editable; new lists appendable (up to 32); TX/revert and timing fields remain untouched |
 | Radio settings | Marker `0x04` | Radio alias, APRS enable and data-transmit server decoded/editable |
 | VFO records | Marker `0x78`; VFO A RX/TX at `0xfa0`/`0xfa4`, VFO B RX/TX at `0xfd0`/`0xfd4`; each is 24-bit little-endian BCD in kHz | Four RX/TX frequencies decoded and editable |
 | Systems, lone worker and privacy | Marker `0x11`, ranges `0x606`-`0x6ab`, `0x700`-`0x7ff`, `0x800`-`0xbff` | Ranges located; field layouts are incomplete or marked uncertain |
@@ -71,5 +71,5 @@ second byte form the 12-bit, one-based contact index; index zero and `0xfff` mea
 low nibble records private-versus-non-private call type. qdmr refuses to write contacts synthesized
 only to satisfy an RX group, because they have no contact record in the radio. RT72 channel type is
 bit 6 of record byte `0x18`; this interpretation matches the `Type` column for all 25 local CPS
-channels. Scan-list membership records are decoded conservatively; priority and timing bytes remain
-unmapped.
+channels. Scan-list memberships are decoded conservatively; priority channels at `+0x12/+0x13` are
+decoded and editable, while TX/revert and timing fields remain unmapped.

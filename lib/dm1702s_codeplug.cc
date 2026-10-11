@@ -187,6 +187,14 @@ public:
     return getUInt6(0x19, 0)-1;
   }
 
+  void setScanListIndex(unsigned int index) override {
+    setUInt6(0x19, 0, static_cast<uint8_t>(index+1));
+  }
+
+  void clearScanListIndex() override {
+    setUInt6(0x19, 0, 0);
+  }
+
   DM32UVCodeplug::ChannelElement::Admit admitCriterion() const override {
     return static_cast<Admit>(getUInt2(0x1a, channelType() == ChannelType::DMR ? 3 : 0));
   }
@@ -279,10 +287,15 @@ DM1702SCodeplug::clearPages() {
   _originalChannelNames.clear();
   _originalChannelContactIndexes.clear();
   _originalChannelGPSIndexes.clear();
+  _originalChannelScanListIndexes.clear();
   _originalContacts.clear();
   _originalRXGroupOffsets.clear();
   _originalRXGroupNames.clear();
   _originalRXGroupMembers.clear();
+  _originalScanListNames.clear();
+  _originalScanListMembers.clear();
+  _originalScanListPrimaryIndexes.clear();
+  _originalScanListSecondaryIndexes.clear();
   _originalZoneNames.clear();
   _originalZoneAMembers.clear();
   _originalZoneBMembers.clear();
@@ -397,18 +410,29 @@ DM1702SCodeplug::decode(Config *config, const ErrorStack &err) {
   config->scanlists()->clear();
   config->zones()->clear();
   _originalContacts.clear();
+  _originalScanListNames.clear();
+  _originalScanListMembers.clear();
+  _originalScanListPrimaryIndexes.clear();
+  _originalScanListSecondaryIndexes.clear();
   QMap<unsigned int, DMRContact *> groupContacts;
   QMap<int, QVector<unsigned int>> scanListMembers;
   Context context(config);
   constexpr size_t scanListRecordSize = 0x39;
-  constexpr size_t scanListCount = 32;
+  constexpr size_t maxScanListCount = 32;
+  const size_t scanListCount=static_cast<uint8_t>(scanListData[0]);
+  if (scanListCount > maxScanListCount) {
+    errMsg(err) << "Invalid DM1702S scan list count.";
+    return false;
+  }
   for (size_t index=0; index<scanListCount; ++index) {
     const size_t offset=index*scanListRecordSize;
     const QString name=readLatin1(scanListData, offset+1, 16);
     if (name.isEmpty() || std::any_of(name.cbegin(), name.cend(), [](QChar character) {
           return (character.unicode() < 0x20) || (character.unicode() > 0x7e);
-        }))
-      continue;
+        })) {
+      errMsg(err) << "Invalid DM1702S scan list name at index " << (index+1) << ".";
+      return false;
+    }
 
     auto *scanList=new ScanList(name);
     config->scanlists()->add(scanList, -1, false);
@@ -418,10 +442,26 @@ DM1702SCodeplug::decode(Config *config, const ErrorStack &err) {
       const size_t memberOffset=offset+0x1b+member*2;
       const unsigned int channelNumber=static_cast<uint8_t>(scanListData[memberOffset]) |
           (static_cast<unsigned int>(static_cast<uint8_t>(scanListData[memberOffset+1])) << 8);
-      if ((channelNumber > 0) && (channelNumber <= channelCount))
-        members.append(channelNumber-1);
+      if ((0 == channelNumber) || (0xffff == channelNumber))
+        break;
+      if (channelNumber > channelCount) {
+        errMsg(err) << "DM1702S scan list " << (index+1) << " references invalid channel "
+                    << channelNumber << ".";
+        return false;
+      }
+      members.append(channelNumber-1);
     }
     scanListMembers.insert(static_cast<int>(index), members);
+    _originalScanListNames.append(name);
+    _originalScanListMembers.append(members);
+    const unsigned int primaryChannel=static_cast<uint8_t>(scanListData[offset+0x12]);
+    const unsigned int secondaryChannel=static_cast<uint8_t>(scanListData[offset+0x13]);
+    if ((primaryChannel > channelCount) || (secondaryChannel > channelCount)) {
+      errMsg(err) << "DM1702S scan list " << (index+1) << " has an invalid priority-channel index.";
+      return false;
+    }
+    _originalScanListPrimaryIndexes.append(primaryChannel ? static_cast<int>(primaryChannel)-1 : -1);
+    _originalScanListSecondaryIndexes.append(secondaryChannel ? static_cast<int>(secondaryChannel)-1 : -1);
   }
 
   const QByteArray bitmap = contactMap.mid(0x10, 0x64);
@@ -564,6 +604,7 @@ DM1702SCodeplug::decode(Config *config, const ErrorStack &err) {
   _originalChannelNames.clear();
   _originalChannelContactIndexes.clear();
   _originalChannelGPSIndexes.clear();
+  _originalChannelScanListIndexes.clear();
   for (size_t index=0; index<channelCount; ++index) {
     const QString name = readChannelName(channelNames, index);
     if (name.isEmpty()) {
@@ -582,8 +623,18 @@ DM1702SCodeplug::decode(Config *config, const ErrorStack &err) {
       return false;
     }
     config->channelList()->add(channel);
-    if (element.validScanListIndex() && context.has<ScanList>(element.scanListIndex()))
-      channel->setScanList(context.get<ScanList>(element.scanListIndex()));
+    int scanListIndex=-1;
+    if (element.validScanListIndex()) {
+      scanListIndex=static_cast<int>(element.scanListIndex());
+      if (!context.has<ScanList>(static_cast<unsigned int>(scanListIndex))) {
+        errMsg(err) << "DM1702S channel " << (index+1) << " references invalid scan list "
+                    << (scanListIndex+1) << ".";
+        delete channel;
+        return false;
+      }
+      channel->setScanList(context.get<ScanList>(static_cast<unsigned int>(scanListIndex)));
+    }
+    _originalChannelScanListIndexes.append(scanListIndex);
     if (channel->is<DMRChannel>()) {
       const unsigned int gpsPosition=element.dmrAPRSChannelIndex();
       int gpsIndex=-1;
@@ -641,6 +692,12 @@ DM1702SCodeplug::decode(Config *config, const ErrorStack &err) {
     ScanList *scanList=context.get<ScanList>(static_cast<unsigned int>(list.key()));
     for (unsigned int channelIndex: list.value())
       scanList->addChannel(config->channelList()->channel(static_cast<int>(channelIndex)));
+    const int primaryIndex=_originalScanListPrimaryIndexes[list.key()];
+    const int secondaryIndex=_originalScanListSecondaryIndexes[list.key()];
+    if (primaryIndex >= 0)
+      scanList->setPrimaryChannel(config->channelList()->channel(primaryIndex));
+    if (secondaryIndex >= 0)
+      scanList->setSecondaryChannel(config->channelList()->channel(secondaryIndex));
   }
 
   _originalZoneNames.clear();
@@ -705,6 +762,39 @@ DM1702SCodeplug::encode(Config *config, const Flags &flags, const ErrorStack &er
   if (_originalChannelContactIndexes.size() != config->channelList()->count()) {
     errMsg(err) << "DM1702S source has incomplete channel TX-contact mappings.";
     return false;
+  }
+  if ((_originalChannelScanListIndexes.size() != config->channelList()->count()) ||
+      (config->scanlists()->count() > 32) ||
+      (_originalScanListNames.size() != _originalScanListMembers.size()) ||
+      (_originalScanListNames.size() != _originalScanListPrimaryIndexes.size()) ||
+      (_originalScanListNames.size() != _originalScanListSecondaryIndexes.size())) {
+    errMsg(err) << "DM1702S scan list count or channel references are invalid.";
+    return false;
+  }
+  for (int index=0; index<config->scanlists()->count(); ++index) {
+    ScanList *scanList=config->scanlists()->scanlist(index);
+    const QByteArray name=scanList->name().toLatin1();
+    if (scanList->name().isEmpty() || (QString::fromLatin1(name) != scanList->name()) ||
+        (name.size() > 16) || name.contains('\0') || (scanList->count() > 15) ||
+        scanList->revertChannel() ||
+        std::any_of(scanList->name().cbegin(), scanList->name().cend(), [](QChar character) {
+          return (character.unicode() < 0x20) || (character.unicode() > 0x7e);
+        })) {
+      errMsg(err) << "DM1702S scan lists require printable names, at most 15 channels, and no revert channel.";
+      return false;
+    }
+    for (int member=0; member<scanList->count(); ++member)
+      if (config->channelList()->indexOf(scanList->channel(member)) < 0) {
+        errMsg(err) << "DM1702S scan list references a channel outside the channel list.";
+        return false;
+      }
+    auto validPriority=[&](Channel *channel) {
+      return (nullptr == channel) || (config->channelList()->indexOf(channel) >= 0);
+    };
+    if (!validPriority(scanList->primaryChannel()) || !validPriority(scanList->secondaryChannel())) {
+      errMsg(err) << "DM1702S priority channels must belong to the codeplug channel list.";
+      return false;
+    }
   }
   if ((_originalChannelGPSIndexes.size() != config->channelList()->count()) ||
       (config->posSystems()->count() < _originalGPSSystemNames.size()) ||
@@ -836,44 +926,22 @@ DM1702SCodeplug::encode(Config *config, const Flags &flags, const ErrorStack &er
     for (unsigned int channelIndex: _originalZoneBMembers[index])
       zone->B()->add(normalized.channelList()->channel(static_cast<int>(channelIndex)));
   }
-  for (int index=0; index<config->scanlists()->count(); ++index) {
-    ScanList *sourceList=config->scanlists()->scanlist(index);
+  while (normalized.scanlists()->count() < _originalScanListNames.size())
+    normalized.scanlists()->add(new ScanList());
+  for (int index=0; index<_originalScanListNames.size(); ++index) {
     ScanList *copyList=normalized.scanlists()->scanlist(index);
-    auto channelIndex=[&](Channel *channel) {
-      for (int candidate=0; candidate<config->channelList()->count(); ++candidate)
-        if (config->channelList()->channel(candidate) == channel)
-          return candidate;
-      return -1;
-    };
-    QVector<int> members;
-    for (int member=0; member<sourceList->count(); ++member) {
-      const int candidate=channelIndex(sourceList->channel(member));
-      if (candidate < 0) {
-        errMsg(err) << "DM1702S scan list references a channel outside the channel list.";
-        return false;
-      }
-      members.append(candidate);
-    }
-    const int primaryIndex=sourceList->primaryChannel() ? channelIndex(sourceList->primaryChannel()) : -1;
-    const int secondaryIndex=sourceList->secondaryChannel() ? channelIndex(sourceList->secondaryChannel()) : -1;
-    const int revertIndex=sourceList->revertChannel() ? channelIndex(sourceList->revertChannel()) : -1;
-    if (((nullptr != sourceList->primaryChannel()) && (primaryIndex < 0)) ||
-        ((nullptr != sourceList->secondaryChannel()) && (secondaryIndex < 0)) ||
-        ((nullptr != sourceList->revertChannel()) && (revertIndex < 0))) {
-      errMsg(err) << "DM1702S scan list priority/revert reference is not a codeplug channel.";
+    if (nullptr == copyList) {
+      errMsg(err) << "Cannot normalize DM1702S scan list " << (index+1) << ".";
       return false;
     }
-
     copyList->clear();
-    copyList->setName(sourceList->name());
-    for (int member: members)
-      copyList->addChannel(normalized.channelList()->channel(member));
-    if (primaryIndex >= 0)
-      copyList->setPrimaryChannel(normalized.channelList()->channel(primaryIndex));
-    if (secondaryIndex >= 0)
-      copyList->setSecondaryChannel(normalized.channelList()->channel(secondaryIndex));
-    if (revertIndex >= 0)
-      copyList->setRevertChannel(normalized.channelList()->channel(revertIndex));
+    copyList->setName(_originalScanListNames[index]);
+    for (unsigned int channelIndex: _originalScanListMembers[index])
+      copyList->addChannel(normalized.channelList()->channel(static_cast<int>(channelIndex)));
+    if (_originalScanListPrimaryIndexes[index] >= 0)
+      copyList->setPrimaryChannel(normalized.channelList()->channel(_originalScanListPrimaryIndexes[index]));
+    if (_originalScanListSecondaryIndexes[index] >= 0)
+      copyList->setSecondaryChannel(normalized.channelList()->channel(_originalScanListSecondaryIndexes[index]));
   }
   for (int index=0; index<config->channelList()->count(); ++index) {
     Channel *sourceChannel=config->channelList()->channel(index);
@@ -896,10 +964,10 @@ DM1702SCodeplug::encode(Config *config, const Flags &flags, const ErrorStack &er
         errMsg(err) << "DM1702S channel references an unknown scan list.";
         return false;
       }
-      copyChannel->setScanList(normalized.scanlists()->scanlist(scanListIndex));
-    } else {
-      copyChannel->setScanList(nullptr);
     }
+    const int originalScanListIndex=_originalChannelScanListIndexes[index];
+    copyChannel->setScanList((originalScanListIndex < 0) ? nullptr :
+        normalized.scanlists()->scanlist(originalScanListIndex));
     auto *source = config->channelList()->channel(index)->as<DMRChannel>();
     auto *copy = normalized.channelList()->channel(index)->as<DMRChannel>();
     if ((!source) || (!copy))
@@ -926,6 +994,8 @@ DM1702SCodeplug::encode(Config *config, const Flags &flags, const ErrorStack &er
     normalized.posSystems()->del(normalized.posSystems()->system(normalized.posSystems()->count()-1));
   while (normalized.zones()->count() > _originalZoneNames.size())
     normalized.zones()->del(normalized.zones()->zone(normalized.zones()->count()-1));
+  while (normalized.scanlists()->count() > _originalScanListNames.size())
+    normalized.scanlists()->del(normalized.scanlists()->scanlist(normalized.scanlists()->count()-1));
   for (int index=0; index<normalized.channelList()->count(); ++index)
     normalized.channelList()->channel(index)->setName(_originalChannelNames[index]);
   QString normalizedYAML;
@@ -933,7 +1003,7 @@ DM1702SCodeplug::encode(Config *config, const Flags &flags, const ErrorStack &er
   if (!normalized.toYAML(normalizedStream, err))
     return false;
   if (normalizedYAML != _originalConfigYAML) {
-    errMsg(err) << "Only supported DM1702S channel, contact, group, zone, GPS and radio settings can be edited.";
+    errMsg(err) << "Only supported DM1702S channel, contact, group, zone, scan list, GPS and radio settings can be edited.";
     return false;
   }
 
@@ -1029,8 +1099,76 @@ DM1702SCodeplug::encode(Config *config, const Flags &flags, const ErrorStack &er
     }
     const size_t offset=static_cast<size_t>(index)*channelRecordSize;
     DM1702SChannelElement element(reinterpret_cast<uint8_t *>(channelData.data()+offset));
+    const int scanListIndex=config->scanlists()->indexOf(channel->scanList());
+    if (channel->scanList()) {
+      if ((scanListIndex < 0) || (scanListIndex >= 32)) {
+        errMsg(err) << "DM1702S channel references an invalid scan list.";
+        return false;
+      }
+      element.setScanListIndex(static_cast<unsigned int>(scanListIndex));
+    } else {
+      element.clearScanListIndex();
+    }
     element.setDMRAPRSChannelIndex(gpsPosition);
   }
+
+  constexpr size_t scanListRecordSize=0x39;
+  constexpr size_t scanListMemberCount=15;
+  const size_t originalScanListCount=_originalScanListNames.size();
+  QByteArray scanListData;
+  if (!appendRanges(_pages, {{0x13, 0x0720}}, scanListData, err))
+    return false;
+  for (int index=0; index<config->scanlists()->count(); ++index) {
+    const size_t offset=static_cast<size_t>(index)*scanListRecordSize;
+    if (offset+scanListRecordSize > static_cast<size_t>(scanListData.size())) {
+      errMsg(err) << "DM1702S scan list data exceeds its page.";
+      return false;
+    }
+    if (static_cast<size_t>(index) >= originalScanListCount) {
+      std::fill_n(scanListData.begin()+offset, scanListRecordSize, '\0');
+      scanListData[offset+0x0c]=0x03;
+      scanListData[offset+0x0d]=0x03;
+      scanListData[offset+0x0e]=0x06;
+      scanListData[offset+0x10]=0x01;
+      scanListData[offset+0x16]=0x0a;
+      scanListData[offset+0x19]=0x01;
+    }
+    ScanList *scanList=config->scanlists()->scanlist(index);
+    const QByteArray name=scanList->name().toLatin1();
+    std::fill_n(scanListData.begin()+offset+1, 16, '\0');
+    std::copy(name.cbegin(), name.cend(), scanListData.begin()+offset+1);
+    std::fill_n(scanListData.begin()+offset+0x1b, scanListMemberCount*2, '\0');
+    for (int member=0; member<scanList->count(); ++member) {
+      const int channelIndex=config->channelList()->indexOf(scanList->channel(member));
+      const uint16_t channelNumber=static_cast<uint16_t>(channelIndex+1);
+      const size_t memberOffset=offset+0x1b+static_cast<size_t>(member)*2;
+      scanListData[memberOffset]=static_cast<char>(channelNumber & 0xff);
+      scanListData[memberOffset+1]=static_cast<char>(channelNumber >> 8);
+    }
+    auto priorityChannelNumber=[&](Channel *channel) -> int {
+      if (nullptr == channel)
+        return 0;
+      const int channelIndex=config->channelList()->indexOf(channel);
+      if ((channelIndex < 0) || (channelIndex >= 255))
+        return -1;
+      return channelIndex+1;
+    };
+    const int primary=priorityChannelNumber(scanList->primaryChannel());
+    const int secondary=priorityChannelNumber(scanList->secondaryChannel());
+    if ((primary < 0) || (secondary < 0)) {
+      errMsg(err) << "DM1702S priority channels must reference one of the first 255 codeplug channels.";
+      return false;
+    }
+    if (primary || secondary)
+      scanListData[offset+0x0f]=0x02;
+    else if ((static_cast<size_t>(index) < originalScanListCount) &&
+             ((_originalScanListPrimaryIndexes[index] >= 0) ||
+              (_originalScanListSecondaryIndexes[index] >= 0)))
+      scanListData[offset+0x0f]=0;
+    scanListData[offset+0x12]=static_cast<char>(primary);
+    scanListData[offset+0x13]=static_cast<char>(secondary);
+  }
+  scanListData[0]=static_cast<char>(config->scanlists()->count());
 
   const std::vector<std::pair<uint8_t, size_t>> channelContactRanges{{0x27, 0x0800}};
   QByteArray channelContactData;
@@ -1164,6 +1302,8 @@ DM1702SCodeplug::encode(Config *config, const Flags &flags, const ErrorStack &er
   if (!writePages(_pages, channelSlices, channelData, err))
     return false;
   if (!writeRanges(_pages, channelContactRanges, channelContactData, err))
+    return false;
+  if (!writeRanges(_pages, {{0x13, 0x0720}}, scanListData, err))
     return false;
   if (!writeRanges(_pages, zoneRanges, zoneData, err))
     return false;

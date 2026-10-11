@@ -50,6 +50,7 @@ DM1702STest::testChannelDecode() {
   QVERIFY2(codeplug.setPage(0x11, rxLists, err), qPrintable(err.format()));
   QVERIFY2(codeplug.setPage(0x12, page(0x12, 0), err), qPrintable(err.format()));
   QByteArray scanLists=page(0x13, 0);
+  scanLists[0]=1;
   const QByteArray scanListName("Test Scan");
   std::copy(scanListName.cbegin(), scanListName.cend(), scanLists.begin()+1);
   scanLists[0x1b]=1;
@@ -159,6 +160,10 @@ DM1702STest::testChannelDecode() {
   auto *gpsSystem=new DMRAPRSSystem(QStringLiteral("Test GPS"));
   config.posSystems()->add(gpsSystem);
   QVERIFY(decodedChannel->setAPRS(gpsSystem));
+  auto *newScanList=new ScanList(QStringLiteral("qdmr test"));
+  newScanList->addChannel(config.channelList()->channel(0));
+  newScanList->setPrimaryChannel(config.channelList()->channel(0));
+  config.scanlists()->add(newScanList, -1, false);
   auto *testZone=new Zone(QStringLiteral("QDMR-TEST"));
   testZone->A()->add(config.channelList()->channel(0));
   testZone->B()->add(config.channelList()->channel(0));
@@ -196,15 +201,27 @@ DM1702STest::testChannelDecode() {
   QCOMPARE(static_cast<uint8_t>(codeplug.page(0x45)[0x1b3]), 1);
   QCOMPARE(codeplug.page(0x45).mid(0x1b4, 2), QByteArray::fromHex("0100"));
   QCOMPARE(codeplug.page(0x27).left(2), QByteArray::fromHex("0102"));
+  QCOMPARE(static_cast<uint8_t>(codeplug.page(0x13)[0]), 2);
+  QCOMPARE(codeplug.page(0x13).mid(0x3a, 9), QByteArray("qdmr test", 9));
+  QCOMPARE(static_cast<uint8_t>(codeplug.page(0x13)[0x48]), 2);
+  QCOMPARE(static_cast<uint8_t>(codeplug.page(0x13)[0x4b]), 1);
+  QCOMPARE(codeplug.page(0x13).mid(0x54, 2), QByteArray::fromHex("0100"));
   DM1702SCodeplug reloaded;
   for (uint8_t marker: codeplug.pageMarkers())
     QVERIFY2(reloaded.setPage(marker, codeplug.page(marker), err), qPrintable(err.format()));
   Config roundTrip;
   QVERIFY2(reloaded.decode(&roundTrip, err), qPrintable(err.format()));
-  QCOMPARE(roundTrip.scanlists()->count(), 1);
+  QCOMPARE(roundTrip.scanlists()->count(), 2);
   QCOMPARE(roundTrip.scanlists()->scanlist(0)->name(), QStringLiteral("Test Scan"));
   QCOMPARE(roundTrip.scanlists()->scanlist(0)->count(), 1);
   QCOMPARE(roundTrip.channelList()->channel(0)->scanList(), roundTrip.scanlists()->scanlist(0));
+  QCOMPARE(roundTrip.scanlists()->scanlist(1)->name(), QStringLiteral("qdmr test"));
+  QCOMPARE(roundTrip.scanlists()->scanlist(1)->count(), 1);
+  QCOMPARE(roundTrip.scanlists()->scanlist(1)->channel(0), roundTrip.channelList()->channel(0));
+  QCOMPARE(roundTrip.scanlists()->scanlist(1)->primaryChannel(), roundTrip.channelList()->channel(0));
+  QVERIFY(roundTrip.scanlists()->del(roundTrip.scanlists()->scanlist(1)));
+  QVERIFY2(reloaded.encode(&roundTrip, Codeplug::Flags(), err), qPrintable(err.format()));
+  QCOMPARE(static_cast<uint8_t>(reloaded.page(0x13)[0]), 1);
   QCOMPARE(roundTrip.posSystems()->count(), 1);
   QCOMPARE(roundTrip.posSystems()->system(0)->name(), QStringLiteral("Test GPS"));
   QCOMPARE(roundTrip.channelList()->channel(0)->as<DMRChannel>()->aprs(),

@@ -41,10 +41,15 @@ private:
   QStringList _originalChannelNames;
   QVector<int> _originalChannelContactIndexes;
   QVector<int> _originalChannelGPSIndexes;
+  QVector<int> _originalChannelScanListIndexes;
   QVector<ContactRecord> _originalContacts;
   QVector<size_t> _originalRXGroupOffsets;
   QStringList _originalRXGroupNames;
   QVector<QVector<unsigned int>> _originalRXGroupMembers;
+  QStringList _originalScanListNames;
+  QVector<QVector<unsigned int>> _originalScanListMembers;
+  QVector<int> _originalScanListPrimaryIndexes;
+  QVector<int> _originalScanListSecondaryIndexes;
   QStringList _originalZoneNames;
   QVector<QVector<unsigned int>> _originalZoneAMembers;
   QVector<QVector<unsigned int>> _originalZoneBMembers;

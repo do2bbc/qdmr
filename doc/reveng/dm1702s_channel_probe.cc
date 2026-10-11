@@ -192,6 +192,23 @@ int main(int argc, char **argv) {
     std::cout << " [" << zone->name().toStdString() << " A=" << zone->A()->count()
               << " B=" << zone->B()->count() << ']';
   }
+  std::cout << " ScanLists=" << config.scanlists()->count();
+  for (int index=0; index<config.scanlists()->count(); ++index) {
+    const ScanList *scanList=config.scanlists()->scanlist(index);
+    std::cout << " [" << scanList->name().toStdString() << ':';
+    for (int member=0; member<scanList->count(); ++member) {
+      if (member)
+        std::cout << ',';
+      std::cout << (config.channelList()->indexOf(scanList->channel(member))+1);
+    }
+    std::cout << " P1="
+              << (scanList->primaryChannel()
+                      ? config.channelList()->indexOf(scanList->primaryChannel())+1 : 0)
+              << " P2="
+              << (scanList->secondaryChannel()
+                      ? config.channelList()->indexOf(scanList->secondaryChannel())+1 : 0)
+              << ']';
+  }
   std::cout << " GPS=" << config.posSystems()->count();
   for (int index=0; index<config.posSystems()->count(); ++index)
     std::cout << " [" << config.posSystems()->system(index)->name().toStdString() << ']';
