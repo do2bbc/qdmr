@@ -119,24 +119,27 @@ int main(int argc, char **argv) {
     return (found == headers.end()) ? headers.size() : static_cast<size_t>(found-headers.begin());
   };
   const size_t aliasColumn = column("Alias");
+  const size_t typeColumn = column("Type");
   const size_t rxColumn = column("RX Freq");
   const size_t txColumn = column("TX Freq");
   const size_t numberColumn = column("CH.");
-  if ((aliasColumn == headers.size()) || (rxColumn == headers.size()) ||
+  if ((aliasColumn == headers.size()) || (typeColumn == headers.size()) ||
+      (rxColumn == headers.size()) ||
       (txColumn == headers.size()) || (numberColumn == headers.size())) {
-    std::cerr << "CSV must contain CH., Alias, RX Freq, and TX Freq columns.\n";
+    std::cerr << "CSV must contain CH., Type, Alias, RX Freq, and TX Freq columns.\n";
     return 1;
   }
 
   size_t rows = 0;
   size_t namesMatched = 0;
+  size_t typesMatched = 0;
   size_t rawRxMatched = 0;
   size_t rawTxMatched = 0;
   size_t rxMatched = 0;
   size_t txMatched = 0;
   while (std::getline(csv, line)) {
     const std::vector<std::string> fields = parseCsvRow(line);
-    if (fields.size() <= std::max({aliasColumn, rxColumn, txColumn, numberColumn}))
+    if (fields.size() <= std::max({aliasColumn, typeColumn, rxColumn, txColumn, numberColumn}))
       continue;
     ++rows;
 
@@ -150,6 +153,9 @@ int main(int argc, char **argv) {
     if (alias.empty() || !channelNumber || (channelNumber > channelCount))
       continue;
     const Channel *channel = config.channelList()->channel(channelNumber-1);
+    const bool expectedDMR = ("1" == fields[typeColumn]);
+    if (expectedDMR == channel->is<DMRChannel>())
+      ++typesMatched;
     if (channel->name().toStdString() != alias)
       continue;
     ++namesMatched;
@@ -171,10 +177,30 @@ int main(int argc, char **argv) {
   }
 
   std::cout << "Image channels=" << channelCount << " CSV rows=" << rows
-            << " names matched=" << namesMatched
+            << " names matched=" << namesMatched << " types matched=" << typesMatched
             << " raw RX/TX matches=" << rawRxMatched << '/' << rawTxMatched
             << " qdmr channels decoded=" << channelCount
             << " RX matches=" << rxMatched << " TX matches=" << txMatched << '\n';
-  return ((rows == channelCount) && (namesMatched == rows) &&
+  const DM1702SSettingsExtension *radioSettings=config.settings()->dm1702sExtension();
+  std::cout << "VFO A RX/TX=" << radioSettings->vfoARXFrequency().inHz() << '/'
+            << radioSettings->vfoATXFrequency().inHz()
+            << " VFO B RX/TX=" << radioSettings->vfoBRXFrequency().inHz() << '/'
+            << radioSettings->vfoBTXFrequency().inHz() << '\n';
+  std::cout << "Zones=" << config.zones()->count();
+  for (int index=0; index<config.zones()->count(); ++index) {
+    const Zone *zone=config.zones()->zone(index);
+    std::cout << " [" << zone->name().toStdString() << " A=" << zone->A()->count()
+              << " B=" << zone->B()->count() << ']';
+  }
+  std::cout << " GPS=" << config.posSystems()->count();
+  for (int index=0; index<config.posSystems()->count(); ++index)
+    std::cout << " [" << config.posSystems()->system(index)->name().toStdString() << ']';
+  for (int index=0; index<config.channelList()->count(); ++index) {
+    const auto *channel=config.channelList()->channel(index)->as<DMRChannel>();
+    if (channel && channel->aprs())
+      std::cout << " CH" << (index+1) << " GPS=" << channel->aprs()->name().toStdString();
+  }
+  std::cout << '\n';
+  return ((rows == channelCount) && (namesMatched == rows) && (typesMatched == rows) &&
       (rxMatched == rows) && (txMatched == rows)) ? 0 : 3;
 }

@@ -39,13 +39,23 @@ private:
   QMap<uint8_t, QByteArray> _pages;
   QMap<uint8_t, uint32_t> _pageAddresses;
   QStringList _originalChannelNames;
+  QVector<int> _originalChannelContactIndexes;
+  QVector<int> _originalChannelGPSIndexes;
   QVector<ContactRecord> _originalContacts;
   QVector<size_t> _originalRXGroupOffsets;
   QStringList _originalRXGroupNames;
   QVector<QVector<unsigned int>> _originalRXGroupMembers;
+  QStringList _originalZoneNames;
+  QVector<QVector<unsigned int>> _originalZoneAMembers;
+  QVector<QVector<unsigned int>> _originalZoneBMembers;
+  QStringList _originalGPSSystemNames;
   QString _originalRadioAlias;
   bool _originalAprsEnabled;
   DM1702SSettingsExtension::DataTransmitServer _originalDataTransmitServer;
+  Frequency _originalVfoARXFrequency;
+  Frequency _originalVfoATXFrequency;
+  Frequency _originalVfoBRXFrequency;
+  Frequency _originalVfoBTXFrequency;
   QString _originalConfigYAML;
 };
 

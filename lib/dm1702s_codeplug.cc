@@ -113,12 +113,160 @@ QString readLatin1(const QByteArray &data, size_t offset, size_t maxLength) {
     ++length;
   return QString::fromLatin1(data.constData()+offset, static_cast<int>(length));
 }
+
+bool readBCD24Frequency(const QByteArray &data, size_t offset, Frequency &frequency,
+                        const ErrorStack &err) {
+  if (offset+3 > static_cast<size_t>(data.size())) {
+    errMsg(err) << "DM1702S VFO frequency is outside its page.";
+    return false;
+  }
+  uint32_t value=0;
+  uint32_t multiplier=1;
+  for (size_t index=0; index<3; ++index) {
+    const uint8_t byte=static_cast<uint8_t>(data[offset+index]);
+    const uint8_t low=byte & 0x0f;
+    const uint8_t high=(byte >> 4) & 0x0f;
+    if ((low > 9) || (high > 9)) {
+      errMsg(err) << "Invalid BCD digit in DM1702S VFO frequency.";
+      return false;
+    }
+    value += static_cast<uint32_t>(low)*multiplier;
+    multiplier *= 10;
+    value += static_cast<uint32_t>(high)*multiplier;
+    multiplier *= 10;
+  }
+  frequency=Frequency::fromHz(static_cast<qint64>(value)*1000);
+  return true;
+}
+
+bool writeBCD24Frequency(QByteArray &data, size_t offset, const Frequency &frequency,
+                         const ErrorStack &err) {
+  const qint64 hertz=frequency.inHz();
+  if ((hertz < 0) || (hertz % 1000) || (hertz/1000 > 999999) ||
+      (offset+3 > static_cast<size_t>(data.size()))) {
+    errMsg(err) << "DM1702S VFO frequencies must be in 1 kHz steps and fit six BCD digits.";
+    return false;
+  }
+  uint32_t value=static_cast<uint32_t>(hertz/1000);
+  for (size_t index=0; index<3; ++index) {
+    const uint8_t low=value % 10;
+    value /= 10;
+    const uint8_t high=value % 10;
+    value /= 10;
+    data[offset+index]=static_cast<char>((high << 4) | low);
+  }
+  return true;
+}
+
+class DM1702SChannelElement final : public DM32UVCodeplug::ChannelElement {
+public:
+  explicit DM1702SChannelElement(uint8_t *data)
+    : DM32UVCodeplug::ChannelElement(data) {}
+
+  ChannelType channelType() const override {
+    return getBit(0x18, 6) ? ChannelType::DMR : ChannelType::FM;
+  }
+
+  Channel::Power power() const override {
+    return getBit(0x18, 1) ? Channel::Power::High : Channel::Power::Low;
+  }
+
+  bool loneWorkerEnabled() const override {
+    return getBit(0x18, 2);
+  }
+
+  FMChannel::Bandwidth bandwidth() const override {
+    return getBit(0x18, 0) ? FMChannel::Bandwidth::Wide : FMChannel::Bandwidth::Narrow;
+  }
+
+  bool validScanListIndex() const override {
+    return 0 != getUInt6(0x19, 0);
+  }
+
+  unsigned int scanListIndex() const override {
+    return getUInt6(0x19, 0)-1;
+  }
+
+  DM32UVCodeplug::ChannelElement::Admit admitCriterion() const override {
+    return static_cast<Admit>(getUInt2(0x1a, channelType() == ChannelType::DMR ? 3 : 0));
+  }
+
+  bool emergencyNotificationEnabled() const override {
+    return getBit(0x1b, 7);
+  }
+
+  bool emergencyACKEnabled() const override {
+    return getBit(0x1b, 6);
+  }
+
+  bool validEmergencySystemIndex() const override {
+    return 0 != getUInt4(0x1b, 0);
+  }
+
+  unsigned int emergencySystemIndex() const override {
+    return getUInt4(0x1b, 0)-1;
+  }
+
+  bool rxOnlyEnabled() const override {
+    return getBit(0x18, 5);
+  }
+
+  bool privateCallACKEnabled() const override {
+    return getBit(0x1d, 5);
+  }
+
+  bool dataACKEnabled() const override {
+    return getBit(0x1d, 4);
+  }
+
+  bool dcdmEnabled() const override {
+    return getBit(0x1e, 5);
+  }
+
+  DMRChannel::TimeSlot timeslot() const override {
+    return getBit(0x1e, 4) ? DMRChannel::TimeSlot::TS2 : DMRChannel::TimeSlot::TS1;
+  }
+
+  unsigned int colorCode() const override {
+    return getUInt4(0x1e, 0);
+  }
+
+  bool hasKeyIndex() const override {
+    return 0 != getUInt4(0x1f, 0);
+  }
+
+  unsigned int keyIndex() const override {
+    return getUInt4(0x1f, 0)-1;
+  }
+
+  bool encryptionEnabled() const override {
+    return getBit(0x1f, 7);
+  }
+
+  SelectiveCall rxTone() const override {
+    return decodeSelectiveCall(getUInt16_le(0x23));
+  }
+
+  SelectiveCall txTone() const override {
+    return decodeSelectiveCall(getUInt16_le(0x25));
+  }
+
+  bool voxEnabled() const override {
+    return getBit(0x27, 4);
+  }
+
+  bool talkaroundEnabled() const override {
+    return getBit(0x2b, 6);
+  }
+};
 }
 
 DM1702SCodeplug::DM1702SCodeplug(QObject *parent)
   : Codeplug(parent), _pages(), _pageAddresses(), _originalChannelNames(), _originalRadioAlias(),
     _originalAprsEnabled(false),
     _originalDataTransmitServer(DM1702SSettingsExtension::DataTransmitServer::HyteraDefinedData),
+    _originalVfoARXFrequency(), _originalVfoATXFrequency(), _originalVfoBRXFrequency(),
+    _originalVfoBTXFrequency(),
     _originalConfigYAML()
 {
   addImage(QStringLiteral("DM1702S"));
@@ -129,13 +277,23 @@ DM1702SCodeplug::clearPages() {
   _pages.clear();
   _pageAddresses.clear();
   _originalChannelNames.clear();
+  _originalChannelContactIndexes.clear();
+  _originalChannelGPSIndexes.clear();
   _originalContacts.clear();
   _originalRXGroupOffsets.clear();
   _originalRXGroupNames.clear();
   _originalRXGroupMembers.clear();
+  _originalZoneNames.clear();
+  _originalZoneAMembers.clear();
+  _originalZoneBMembers.clear();
+  _originalGPSSystemNames.clear();
   _originalRadioAlias.clear();
   _originalAprsEnabled = false;
   _originalDataTransmitServer = DM1702SSettingsExtension::DataTransmitServer::HyteraDefinedData;
+  _originalVfoARXFrequency = Frequency();
+  _originalVfoATXFrequency = Frequency();
+  _originalVfoBRXFrequency = Frequency();
+  _originalVfoBTXFrequency = Frequency();
   _originalConfigYAML.clear();
 }
 
@@ -204,23 +362,68 @@ DM1702SCodeplug::decode(Config *config, const ErrorStack &err) {
     return false;
   }
 
-  QByteArray contactMap, contactData, rxListData;
+  QByteArray contactMap, contactData, channelContactData, scanListData, zoneData, rxListData;
   std::vector<std::pair<uint8_t, size_t>> contactSlices;
   for (uint8_t marker=0x28; marker<=0x2c; ++marker)
     contactSlices.emplace_back(marker, 0x0ff0);
+  std::vector<std::pair<uint8_t, size_t>> zoneRanges{{0x45, 0x0f0c}};
+  for (uint8_t marker=0x46; marker<=0x56; ++marker)
+    zoneRanges.emplace_back(marker, 0x0efc);
   if (!appendRanges(_pages, {{0x0b, 0x0fff}}, contactMap, err) ||
       !appendRanges(_pages, contactSlices, contactData, err) ||
+      !appendRanges(_pages, {{0x27, 0x0800}}, channelContactData, err) ||
+      !appendRanges(_pages, {{0x13, 0x0720}}, scanListData, err) ||
+      !appendRanges(_pages, zoneRanges, zoneData, err) ||
       !appendRanges(_pages, {{0x11, 0x0606}, {0x12, 0x073d}}, rxListData, err))
     return false;
+  if (channelCount > static_cast<size_t>(channelContactData.size())/2) {
+    errMsg(err) << "DM1702S channel TX-contact table is too short.";
+    return false;
+  }
   if ((contactMap.size() < 0x74) || (contactData.size() < 800*0x18)) {
     errMsg(err) << "DM1702S contact data is truncated.";
+    return false;
+  }
+  const unsigned int zoneCount=static_cast<uint8_t>(zoneData[0]);
+  constexpr size_t zoneRecordSize=0x112;
+  if ((zoneCount > 250) ||
+      (0x10+static_cast<size_t>(zoneCount)*zoneRecordSize > static_cast<size_t>(zoneData.size()))) {
+    errMsg(err) << "Invalid DM1702S zone count or truncated zone data.";
     return false;
   }
 
   config->contacts()->clear();
   config->rxGroupLists()->clear();
+  config->scanlists()->clear();
+  config->zones()->clear();
   _originalContacts.clear();
   QMap<unsigned int, DMRContact *> groupContacts;
+  QMap<int, QVector<unsigned int>> scanListMembers;
+  Context context(config);
+  constexpr size_t scanListRecordSize = 0x39;
+  constexpr size_t scanListCount = 32;
+  for (size_t index=0; index<scanListCount; ++index) {
+    const size_t offset=index*scanListRecordSize;
+    const QString name=readLatin1(scanListData, offset+1, 16);
+    if (name.isEmpty() || std::any_of(name.cbegin(), name.cend(), [](QChar character) {
+          return (character.unicode() < 0x20) || (character.unicode() > 0x7e);
+        }))
+      continue;
+
+    auto *scanList=new ScanList(name);
+    config->scanlists()->add(scanList, -1, false);
+    context.add(scanList, static_cast<unsigned int>(index));
+    QVector<unsigned int> members;
+    for (unsigned int member=0; member<15; ++member) {
+      const size_t memberOffset=offset+0x1b+member*2;
+      const unsigned int channelNumber=static_cast<uint8_t>(scanListData[memberOffset]) |
+          (static_cast<unsigned int>(static_cast<uint8_t>(scanListData[memberOffset+1])) << 8);
+      if ((channelNumber > 0) && (channelNumber <= channelCount))
+        members.append(channelNumber-1);
+    }
+    scanListMembers.insert(static_cast<int>(index), members);
+  }
+
   const QByteArray bitmap = contactMap.mid(0x10, 0x64);
   for (unsigned int slot=0; slot<800; ++slot) {
     if (static_cast<uint8_t>(bitmap[slot/8]) & (1u << (slot%8)))
@@ -298,6 +501,35 @@ DM1702SCodeplug::decode(Config *config, const ErrorStack &err) {
     errMsg(err) << "Missing or invalid DM1702S settings page.";
     return false;
   }
+  const unsigned int gpsSystemCount=static_cast<uint8_t>(settingsPage[0x600]);
+  if (gpsSystemCount > 16) {
+    errMsg(err) << "Invalid DM1702S GPS system count.";
+    return false;
+  }
+  config->posSystems()->clear();
+  _originalGPSSystemNames.clear();
+  for (unsigned int index=0; index<gpsSystemCount; ++index) {
+    const QString name=readLatin1(settingsPage, 0x500+index*0x10, 9);
+    if (name.isEmpty() || std::any_of(name.cbegin(), name.cend(), [](QChar character) {
+          return !character.isPrint();
+        })) {
+      errMsg(err) << "Invalid DM1702S GPS system name at index " << (index+1) << ".";
+      return false;
+    }
+    config->posSystems()->add(new DMRAPRSSystem(name), -1, false);
+    _originalGPSSystemNames.append(name);
+  }
+  const QByteArray vfoPage=_pages.value(0x78);
+  if ((vfoPage.size() != static_cast<int>(sectorSize)) ||
+      (vfoPage.at(sectorSize-1) != static_cast<char>(0x78))) {
+    errMsg(err) << "Missing or invalid DM1702S VFO page.";
+    return false;
+  }
+  if (!readBCD24Frequency(vfoPage, 0x0fa0, _originalVfoARXFrequency, err) ||
+      !readBCD24Frequency(vfoPage, 0x0fa4, _originalVfoATXFrequency, err) ||
+      !readBCD24Frequency(vfoPage, 0x0fd0, _originalVfoBRXFrequency, err) ||
+      !readBCD24Frequency(vfoPage, 0x0fd4, _originalVfoBTXFrequency, err))
+    return false;
   size_t aliasLength = 0;
   while ((aliasLength < 16) && (settingsPage[0x1d0+aliasLength] != '\0') &&
          (static_cast<unsigned char>(settingsPage[0x1d0+aliasLength]) != 0xff))
@@ -313,6 +545,10 @@ DM1702SCodeplug::decode(Config *config, const ErrorStack &err) {
   config->settings()->dm1702sExtension()->setRadioAlias(_originalRadioAlias);
   config->settings()->dm1702sExtension()->setAprsEnabled(_originalAprsEnabled);
   config->settings()->dm1702sExtension()->setDataTransmitServer(_originalDataTransmitServer);
+  config->settings()->dm1702sExtension()->setVfoARXFrequency(_originalVfoARXFrequency);
+  config->settings()->dm1702sExtension()->setVfoATXFrequency(_originalVfoATXFrequency);
+  config->settings()->dm1702sExtension()->setVfoBRXFrequency(_originalVfoBRXFrequency);
+  config->settings()->dm1702sExtension()->setVfoBTXFrequency(_originalVfoBTXFrequency);
   _originalRXGroupOffsets = rxGroupOffsets;
   _originalRXGroupNames.clear();
   _originalRXGroupMembers.clear();
@@ -326,7 +562,8 @@ DM1702SCodeplug::decode(Config *config, const ErrorStack &err) {
   }
 
   _originalChannelNames.clear();
-  Context context(config);
+  _originalChannelContactIndexes.clear();
+  _originalChannelGPSIndexes.clear();
   for (size_t index=0; index<channelCount; ++index) {
     const QString name = readChannelName(channelNames, index);
     if (name.isEmpty()) {
@@ -337,7 +574,7 @@ DM1702SCodeplug::decode(Config *config, const ErrorStack &err) {
     std::array<uint8_t, channelRecordSize> record{};
     std::copy_n(reinterpret_cast<const uint8_t *>(channelData.constData())+
                   index*channelRecordSize, channelRecordSize, record.begin());
-    DM32UVCodeplug::ChannelElement element(record.data());
+    DM1702SChannelElement element(record.data());
     element.setName(name);
     Channel *channel = element.decode(context, err);
     if (nullptr == channel) {
@@ -345,7 +582,43 @@ DM1702SCodeplug::decode(Config *config, const ErrorStack &err) {
       return false;
     }
     config->channelList()->add(channel);
+    if (element.validScanListIndex() && context.has<ScanList>(element.scanListIndex()))
+      channel->setScanList(context.get<ScanList>(element.scanListIndex()));
     if (channel->is<DMRChannel>()) {
+      const unsigned int gpsPosition=element.dmrAPRSChannelIndex();
+      int gpsIndex=-1;
+      if (gpsPosition) {
+        if (gpsPosition > static_cast<unsigned int>(config->posSystems()->count())) {
+          errMsg(err) << "DM1702S channel " << (index+1) << " has invalid GPS system index "
+                      << gpsPosition << ".";
+          delete channel;
+          return false;
+        }
+        gpsIndex=static_cast<int>(gpsPosition)-1;
+        channel->as<DMRChannel>()->setAPRS(config->posSystems()->system(gpsIndex));
+      }
+      _originalChannelGPSIndexes.append(gpsIndex);
+      const size_t contactOffset=index*2;
+      const unsigned int contactPosition=
+          ((static_cast<unsigned int>(static_cast<uint8_t>(channelContactData[contactOffset])) >> 4) << 8) |
+          static_cast<uint8_t>(channelContactData[contactOffset+1]);
+      int contactIndex=-1;
+      if ((contactPosition != 0) && (contactPosition != 0x0fff)) {
+        if (contactPosition > static_cast<unsigned int>(config->contacts()->count())) {
+          errMsg(err) << "DM1702S channel " << (index+1) << " has invalid TX-contact index "
+                      << contactPosition << ".";
+          delete channel;
+          return false;
+        }
+        contactIndex=static_cast<int>(contactPosition)-1;
+        auto *contact=config->contacts()->contact(contactIndex)->as<DMRContact>();
+        if ((nullptr == contact) || !channel->as<DMRChannel>()->setContact(contact)) {
+          errMsg(err) << "Cannot assign DM1702S TX contact to channel " << (index+1) << ".";
+          delete channel;
+          return false;
+        }
+      }
+      _originalChannelContactIndexes.append(contactIndex);
       const unsigned int groupIndex = record[0x21] & 0x3f;
       if (groupIndex) {
         if (groupIndex > static_cast<unsigned int>(config->rxGroupLists()->count())) {
@@ -356,9 +629,58 @@ DM1702SCodeplug::decode(Config *config, const ErrorStack &err) {
         }
         channel->as<DMRChannel>()->setGroupList(config->rxGroupLists()->list(groupIndex-1));
       }
+    } else {
+      _originalChannelContactIndexes.append(-1);
+      _originalChannelGPSIndexes.append(-1);
     }
     context.add(channel, static_cast<unsigned int>(index));
     _originalChannelNames.append(name);
+  }
+
+  for (auto list=scanListMembers.cbegin(); list!=scanListMembers.cend(); ++list) {
+    ScanList *scanList=context.get<ScanList>(static_cast<unsigned int>(list.key()));
+    for (unsigned int channelIndex: list.value())
+      scanList->addChannel(config->channelList()->channel(static_cast<int>(channelIndex)));
+  }
+
+  _originalZoneNames.clear();
+  _originalZoneAMembers.clear();
+  _originalZoneBMembers.clear();
+  for (unsigned int zoneIndex=0; zoneIndex<zoneCount; ++zoneIndex) {
+    const size_t offset=0x10+static_cast<size_t>(zoneIndex)*zoneRecordSize;
+    const QString name=readLatin1(zoneData, offset, 16);
+    const unsigned int aCount=static_cast<uint8_t>(zoneData[offset+0x10]);
+    const unsigned int bCount=static_cast<uint8_t>(zoneData[offset+0x91]);
+    if (name.isEmpty() || std::any_of(name.cbegin(), name.cend(), [](QChar character) {
+          return !character.isPrint();
+        }) || (aCount > 64) || (bCount > 64)) {
+      errMsg(err) << "Invalid DM1702S zone record " << (zoneIndex+1) << ".";
+      return false;
+    }
+    auto *zone=new Zone(name);
+    config->zones()->add(zone, -1, false);
+    QVector<unsigned int> aMembers, bMembers;
+    auto readMembers=[&](size_t memberOffset, unsigned int count,
+                         QVector<unsigned int> &members, ChannelRefList *list) {
+      for (unsigned int member=0; member<count; ++member) {
+        const unsigned int channelNumber=static_cast<uint8_t>(zoneData[memberOffset+2*member]) |
+            (static_cast<unsigned int>(static_cast<uint8_t>(zoneData[memberOffset+2*member+1])) << 8);
+        if ((channelNumber == 0) || (channelNumber > channelCount))
+          return false;
+        const unsigned int channelIndex=channelNumber-1;
+        members.append(channelIndex);
+        list->add(config->channelList()->channel(static_cast<int>(channelIndex)));
+      }
+      return true;
+    };
+    if (!readMembers(offset+0x11, aCount, aMembers, zone->A()) ||
+        !readMembers(offset+0x92, bCount, bMembers, zone->B())) {
+      errMsg(err) << "DM1702S zone " << (zoneIndex+1) << " references an invalid channel.";
+      return false;
+    }
+    _originalZoneNames.append(name);
+    _originalZoneAMembers.append(aMembers);
+    _originalZoneBMembers.append(bMembers);
   }
 
   QString yaml;
@@ -380,6 +702,29 @@ DM1702SCodeplug::encode(Config *config, const Flags &flags, const ErrorStack &er
     errMsg(err) << "Changing the number of DM1702S channels is not supported yet.";
     return false;
   }
+  if (_originalChannelContactIndexes.size() != config->channelList()->count()) {
+    errMsg(err) << "DM1702S source has incomplete channel TX-contact mappings.";
+    return false;
+  }
+  if ((_originalChannelGPSIndexes.size() != config->channelList()->count()) ||
+      (config->posSystems()->count() < _originalGPSSystemNames.size()) ||
+      (config->posSystems()->count() > 16)) {
+    errMsg(err) << "DM1702S GPS system count or channel references are invalid.";
+    return false;
+  }
+  for (int index=0; index<config->posSystems()->count(); ++index) {
+    auto *system=config->posSystems()->system(index)->as<DMRAPRSSystem>();
+    if (nullptr == system) {
+      errMsg(err) << "DM1702S supports only DMR GPS systems.";
+      return false;
+    }
+    const QByteArray name=system->name().toLatin1();
+    if (system->name().isEmpty() || (QString::fromLatin1(name) != system->name()) ||
+        (name.size() > 9) || name.contains('\0') || name.contains(static_cast<char>(0xff))) {
+      errMsg(err) << "DM1702S GPS system names must contain 1 to 9 Latin-1 bytes.";
+      return false;
+    }
+  }
   if (config->contacts()->count() != _originalContacts.size()) {
     errMsg(err) << "Adding or removing DM1702S contacts is not supported yet.";
     return false;
@@ -388,6 +733,13 @@ DM1702SCodeplug::encode(Config *config, const Flags &flags, const ErrorStack &er
       (_originalRXGroupOffsets.size() != _originalRXGroupNames.size()) ||
       (_originalRXGroupOffsets.size() != _originalRXGroupMembers.size())) {
     errMsg(err) << "Adding or removing DM1702S RX group lists is not supported yet.";
+    return false;
+  }
+  if ((config->zones()->count() < _originalZoneNames.size()) ||
+      (config->zones()->count() > 250) ||
+      (_originalZoneNames.size() != _originalZoneAMembers.size()) ||
+      (_originalZoneNames.size() != _originalZoneBMembers.size())) {
+    errMsg(err) << "Removing zones or exceeding the DM1702S zone limit is not supported.";
     return false;
   }
   for (int index=0; index<config->rxGroupLists()->count(); ++index) {
@@ -418,6 +770,18 @@ DM1702SCodeplug::encode(Config *config, const Flags &flags, const ErrorStack &er
   normalized.settings()->dm1702sExtension()->setRadioAlias(_originalRadioAlias);
   normalized.settings()->dm1702sExtension()->setAprsEnabled(_originalAprsEnabled);
   normalized.settings()->dm1702sExtension()->setDataTransmitServer(_originalDataTransmitServer);
+  normalized.settings()->dm1702sExtension()->setVfoARXFrequency(_originalVfoARXFrequency);
+  normalized.settings()->dm1702sExtension()->setVfoATXFrequency(_originalVfoATXFrequency);
+  normalized.settings()->dm1702sExtension()->setVfoBRXFrequency(_originalVfoBRXFrequency);
+  normalized.settings()->dm1702sExtension()->setVfoBTXFrequency(_originalVfoBTXFrequency);
+  for (int index=0; index<_originalGPSSystemNames.size(); ++index) {
+    auto *system=normalized.posSystems()->system(index)->as<DMRAPRSSystem>();
+    if (nullptr == system) {
+      errMsg(err) << "Cannot normalize DM1702S GPS system " << (index+1) << ".";
+      return false;
+    }
+    system->setName(_originalGPSSystemNames[index]);
+  }
 
   for (int index=0; index<config->contacts()->count(); ++index) {
     auto *contact = config->contacts()->contact(index)->as<DMRContact>();
@@ -459,10 +823,92 @@ DM1702SCodeplug::encode(Config *config, const Flags &flags, const ErrorStack &er
       group->addContact(contact);
     }
   }
+  for (int index=0; index<_originalZoneNames.size(); ++index) {
+    Zone *zone=normalized.zones()->zone(index);
+    if (nullptr == zone) {
+      errMsg(err) << "Cannot normalize DM1702S zone " << (index+1) << ".";
+      return false;
+    }
+    zone->clear();
+    zone->setName(_originalZoneNames[index]);
+    for (unsigned int channelIndex: _originalZoneAMembers[index])
+      zone->A()->add(normalized.channelList()->channel(static_cast<int>(channelIndex)));
+    for (unsigned int channelIndex: _originalZoneBMembers[index])
+      zone->B()->add(normalized.channelList()->channel(static_cast<int>(channelIndex)));
+  }
+  for (int index=0; index<config->scanlists()->count(); ++index) {
+    ScanList *sourceList=config->scanlists()->scanlist(index);
+    ScanList *copyList=normalized.scanlists()->scanlist(index);
+    auto channelIndex=[&](Channel *channel) {
+      for (int candidate=0; candidate<config->channelList()->count(); ++candidate)
+        if (config->channelList()->channel(candidate) == channel)
+          return candidate;
+      return -1;
+    };
+    QVector<int> members;
+    for (int member=0; member<sourceList->count(); ++member) {
+      const int candidate=channelIndex(sourceList->channel(member));
+      if (candidate < 0) {
+        errMsg(err) << "DM1702S scan list references a channel outside the channel list.";
+        return false;
+      }
+      members.append(candidate);
+    }
+    const int primaryIndex=sourceList->primaryChannel() ? channelIndex(sourceList->primaryChannel()) : -1;
+    const int secondaryIndex=sourceList->secondaryChannel() ? channelIndex(sourceList->secondaryChannel()) : -1;
+    const int revertIndex=sourceList->revertChannel() ? channelIndex(sourceList->revertChannel()) : -1;
+    if (((nullptr != sourceList->primaryChannel()) && (primaryIndex < 0)) ||
+        ((nullptr != sourceList->secondaryChannel()) && (secondaryIndex < 0)) ||
+        ((nullptr != sourceList->revertChannel()) && (revertIndex < 0))) {
+      errMsg(err) << "DM1702S scan list priority/revert reference is not a codeplug channel.";
+      return false;
+    }
+
+    copyList->clear();
+    copyList->setName(sourceList->name());
+    for (int member: members)
+      copyList->addChannel(normalized.channelList()->channel(member));
+    if (primaryIndex >= 0)
+      copyList->setPrimaryChannel(normalized.channelList()->channel(primaryIndex));
+    if (secondaryIndex >= 0)
+      copyList->setSecondaryChannel(normalized.channelList()->channel(secondaryIndex));
+    if (revertIndex >= 0)
+      copyList->setRevertChannel(normalized.channelList()->channel(revertIndex));
+  }
   for (int index=0; index<config->channelList()->count(); ++index) {
+    Channel *sourceChannel=config->channelList()->channel(index);
+    Channel *copyChannel=normalized.channelList()->channel(index);
+    auto *sourceDMR=sourceChannel->as<DMRChannel>();
+    auto *copyDMR=copyChannel->as<DMRChannel>();
+    if (sourceDMR && copyDMR) {
+      const int originalGPSIndex=_originalChannelGPSIndexes[index];
+      copyDMR->setAPRS((originalGPSIndex < 0) ? nullptr :
+          normalized.posSystems()->system(originalGPSIndex));
+    }
+    if (sourceChannel->scanList()) {
+      int scanListIndex=-1;
+      for (int candidate=0; candidate<config->scanlists()->count(); ++candidate)
+        if (config->scanlists()->scanlist(candidate) == sourceChannel->scanList()) {
+          scanListIndex=candidate;
+          break;
+        }
+      if (scanListIndex < 0) {
+        errMsg(err) << "DM1702S channel references an unknown scan list.";
+        return false;
+      }
+      copyChannel->setScanList(normalized.scanlists()->scanlist(scanListIndex));
+    } else {
+      copyChannel->setScanList(nullptr);
+    }
     auto *source = config->channelList()->channel(index)->as<DMRChannel>();
     auto *copy = normalized.channelList()->channel(index)->as<DMRChannel>();
-    if ((!source) || (!copy) || (!source->groupList()))
+    if ((!source) || (!copy))
+      continue;
+    const int originalContactIndex=_originalChannelContactIndexes[index];
+    DMRContact *originalContact = (originalContactIndex < 0) ? nullptr :
+        normalized.contacts()->contact(originalContactIndex)->as<DMRContact>();
+    copy->setContact(originalContact);
+    if (!source->groupList())
       continue;
     int groupIndex = -1;
     for (int candidate=0; candidate<config->rxGroupLists()->count(); ++candidate)
@@ -476,6 +922,10 @@ DM1702SCodeplug::encode(Config *config, const Flags &flags, const ErrorStack &er
     }
     copy->setGroupList(normalized.rxGroupLists()->list(groupIndex));
   }
+  while (normalized.posSystems()->count() > _originalGPSSystemNames.size())
+    normalized.posSystems()->del(normalized.posSystems()->system(normalized.posSystems()->count()-1));
+  while (normalized.zones()->count() > _originalZoneNames.size())
+    normalized.zones()->del(normalized.zones()->zone(normalized.zones()->count()-1));
   for (int index=0; index<normalized.channelList()->count(); ++index)
     normalized.channelList()->channel(index)->setName(_originalChannelNames[index]);
   QString normalizedYAML;
@@ -483,8 +933,146 @@ DM1702SCodeplug::encode(Config *config, const Flags &flags, const ErrorStack &er
   if (!normalized.toYAML(normalizedStream, err))
     return false;
   if (normalizedYAML != _originalConfigYAML) {
-    errMsg(err) << "Only DM1702S channel names, RX-group members and radio settings can be edited.";
+    errMsg(err) << "Only supported DM1702S channel, contact, group, zone, GPS and radio settings can be edited.";
     return false;
+  }
+
+  QByteArray vfoPage=_pages.value(0x78);
+  if ((vfoPage.size() != static_cast<int>(sectorSize)) ||
+      (vfoPage.at(sectorSize-1) != static_cast<char>(0x78))) {
+    errMsg(err) << "Missing or invalid DM1702S VFO page.";
+    return false;
+  }
+  const DM1702SSettingsExtension *radioSettings=config->settings()->dm1702sExtension();
+  if (nullptr == radioSettings) {
+    errMsg(err) << "Missing DM1702S radio settings.";
+    return false;
+  }
+  if (!writeBCD24Frequency(vfoPage, 0x0fa0, radioSettings->vfoARXFrequency(), err) ||
+      !writeBCD24Frequency(vfoPage, 0x0fa4, radioSettings->vfoATXFrequency(), err) ||
+      !writeBCD24Frequency(vfoPage, 0x0fd0, radioSettings->vfoBRXFrequency(), err) ||
+      !writeBCD24Frequency(vfoPage, 0x0fd4, radioSettings->vfoBTXFrequency(), err))
+    return false;
+
+  std::vector<std::pair<uint8_t, size_t>> zoneRanges{{0x45, 0x0f0c}};
+  for (uint8_t marker=0x46; marker<=0x56; ++marker)
+    zoneRanges.emplace_back(marker, 0x0efc);
+  QByteArray zoneData;
+  if (!appendRanges(_pages, zoneRanges, zoneData, err))
+    return false;
+  if ((config->zones()->count() > 250) ||
+      (0x10+static_cast<size_t>(config->zones()->count())*0x112 > static_cast<size_t>(zoneData.size()))) {
+    errMsg(err) << "DM1702S zone data exceeds its page chain.";
+    return false;
+  }
+  zoneData[0]=static_cast<char>(config->zones()->count());
+  for (int zoneIndex=0; zoneIndex<config->zones()->count(); ++zoneIndex) {
+    Zone *zone=config->zones()->zone(zoneIndex);
+    const QByteArray name=zone->name().toLatin1();
+    if (zone->name().isEmpty() || (QString::fromLatin1(name) != zone->name()) ||
+        (name.size() > 16) || name.contains('\0') ||
+        std::any_of(zone->name().cbegin(), zone->name().cend(), [](QChar character) {
+          return !character.isPrint();
+        }) || (zone->A()->count() > 64) || (zone->B()->count() > 64)) {
+      errMsg(err) << "DM1702S zone names must be printable Latin-1 and each side limited to 64 channels.";
+      return false;
+    }
+    const size_t offset=0x10+static_cast<size_t>(zoneIndex)*0x112;
+    std::fill_n(zoneData.begin()+offset, 16, '\0');
+    std::copy(name.cbegin(), name.cend(), zoneData.begin()+offset);
+    zoneData[offset+0x10]=static_cast<char>(zone->A()->count());
+    zoneData[offset+0x91]=static_cast<char>(zone->B()->count());
+    for (int side=0; side<2; ++side) {
+      ChannelRefList *members=(0 == side) ? zone->A() : zone->B();
+      const size_t memberOffset=offset+((0 == side) ? 0x11 : 0x92);
+      for (int member=0; member<members->count(); ++member) {
+        Channel *channel=members->get(member)->as<Channel>();
+        const int channelIndex=config->channelList()->indexOf(channel);
+        if ((nullptr == channel) || (channelIndex < 0)) {
+          errMsg(err) << "DM1702S zone references a channel outside the channel list.";
+          return false;
+        }
+        const uint16_t channelNumber=static_cast<uint16_t>(channelIndex+1);
+        zoneData[memberOffset+static_cast<size_t>(member)*2]=static_cast<char>(channelNumber & 0xff);
+        zoneData[memberOffset+static_cast<size_t>(member)*2+1]=static_cast<char>(channelNumber >> 8);
+      }
+    }
+  }
+
+  std::vector<PageSlice> channelSlices;
+  for (uint8_t marker=0x16; marker<=0x22; ++marker)
+    channelSlices.push_back({marker, 0});
+  QByteArray channelData;
+  if (!appendPages(_pages, channelSlices, channelData, err))
+    return false;
+  for (int index=0; index<config->channelList()->count(); ++index) {
+    auto *channel=config->channelList()->channel(index)->as<DMRChannel>();
+    if (nullptr == channel)
+      continue;
+    unsigned int gpsPosition=0;
+    if (channel->aprs()) {
+      if (!channel->aprs()->is<DMRAPRSSystem>()) {
+        errMsg(err) << "DM1702S DMR channels require a DMR GPS system.";
+        return false;
+      }
+      int gpsIndex=-1;
+      for (int candidate=0; candidate<config->posSystems()->count(); ++candidate)
+        if (config->posSystems()->system(candidate) == channel->aprs()) {
+          gpsIndex=candidate;
+          break;
+        }
+      if ((gpsIndex < 0) || (gpsIndex >= 15)) {
+        errMsg(err) << "DM1702S channel GPS system is not in the encodable system list.";
+        return false;
+      }
+      gpsPosition=static_cast<unsigned int>(gpsIndex)+1;
+    }
+    const size_t offset=static_cast<size_t>(index)*channelRecordSize;
+    DM1702SChannelElement element(reinterpret_cast<uint8_t *>(channelData.data()+offset));
+    element.setDMRAPRSChannelIndex(gpsPosition);
+  }
+
+  const std::vector<std::pair<uint8_t, size_t>> channelContactRanges{{0x27, 0x0800}};
+  QByteArray channelContactData;
+  if (!appendRanges(_pages, channelContactRanges, channelContactData, err))
+    return false;
+  for (int index=0; index<config->channelList()->count(); ++index) {
+    auto *channel=config->channelList()->channel(index)->as<DMRChannel>();
+    if (nullptr == channel)
+      continue;
+    const int originalContactIndex=_originalChannelContactIndexes[index];
+    DMRContact *originalContact = (originalContactIndex < 0) ? nullptr :
+        config->contacts()->contact(originalContactIndex)->as<DMRContact>();
+    if (channel->contact() == originalContact)
+      continue;
+
+    unsigned int contactPosition=0;
+    unsigned int contactType=0;
+    if (channel->contact()) {
+      if ((DMRContact::PrivateCall != channel->contact()->type()) &&
+          (DMRContact::GroupCall != channel->contact()->type()) &&
+          (DMRContact::AllCall != channel->contact()->type())) {
+        errMsg(err) << "DM1702S TX contacts must be stored DMR contacts.";
+        return false;
+      }
+      int contactIndex=-1;
+      for (int candidate=0; candidate<config->contacts()->count(); ++candidate)
+        if (config->contacts()->contact(candidate) == channel->contact()) {
+          contactIndex=candidate;
+          break;
+        }
+      if ((contactIndex < 0) || (contactIndex >= _originalContacts.size()) ||
+          (contactIndex >= 0x0ffe) ||
+          (std::numeric_limits<size_t>::max() == _originalContacts[contactIndex].dataOffset)) {
+        errMsg(err) << "DM1702S TX contact is not present in the stored contact list.";
+        return false;
+      }
+      contactPosition=static_cast<unsigned int>(contactIndex)+1;
+      contactType=(DMRContact::PrivateCall == channel->contact()->type()) ? 0 : 1;
+    }
+    const size_t offset=static_cast<size_t>(index)*2;
+    channelContactData[offset]=static_cast<char>(((contactPosition >> 8) << 4) | contactType);
+    channelContactData[offset+1]=static_cast<char>(contactPosition & 0xff);
   }
 
   QByteArray channelNames;
@@ -563,11 +1151,6 @@ DM1702SCodeplug::encode(Config *config, const Flags &flags, const ErrorStack &er
     return false;
   }
 
-  const DM1702SSettingsExtension *radioSettings = config->settings()->dm1702sExtension();
-  if (nullptr == radioSettings) {
-    errMsg(err) << "Missing DM1702S radio settings.";
-    return false;
-  }
   const QByteArray radioAlias = radioSettings->radioAlias().toLatin1();
   if ((QString::fromLatin1(radioAlias) != radioSettings->radioAlias()) ||
       (radioAlias.size() > 16) || radioAlias.contains('\0') ||
@@ -578,10 +1161,17 @@ DM1702SCodeplug::encode(Config *config, const Flags &flags, const ErrorStack &er
 
   if (!writePages(_pages, nameSlices, channelNames, err))
     return false;
+  if (!writePages(_pages, channelSlices, channelData, err))
+    return false;
+  if (!writeRanges(_pages, channelContactRanges, channelContactData, err))
+    return false;
+  if (!writeRanges(_pages, zoneRanges, zoneData, err))
+    return false;
   if (!writeRanges(_pages, contactSlices, contactData, err))
     return false;
   if (!writeRanges(_pages, rxListRanges, rxListData, err))
     return false;
+  _pages[0x78]=vfoPage;
   std::memcpy(settingsPage->data()+0x10, date.constData(), date.size());
   std::memset(settingsPage->data()+0x1d0, 0, 16);
   std::memcpy(settingsPage->data()+0x1d0, radioAlias.constData(), radioAlias.size());
@@ -590,6 +1180,13 @@ DM1702SCodeplug::encode(Config *config, const Flags &flags, const ErrorStack &er
   settingsPage->data()[0x700] = static_cast<char>((static_cast<uint8_t>(settingsPage->at(0x700)) & 0xfe) |
                                                    (DM1702SSettingsExtension::DataTransmitServer::MOTOIP ==
                                                     radioSettings->dataTransmitServer() ? 0x01 : 0x00));
+  for (int index=0; index<config->posSystems()->count(); ++index) {
+    const QByteArray name=config->posSystems()->system(index)->name().toLatin1();
+    const size_t offset=0x500+static_cast<size_t>(index)*0x10;
+    std::memset(settingsPage->data()+offset, 0, 9);
+    std::memcpy(settingsPage->data()+offset, name.constData(), static_cast<size_t>(name.size()));
+  }
+  settingsPage->data()[0x600]=static_cast<char>(config->posSystems()->count());
   return true;
 }
 

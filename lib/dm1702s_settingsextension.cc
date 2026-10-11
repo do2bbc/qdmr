@@ -2,7 +2,8 @@
 
 DM1702SSettingsExtension::DM1702SSettingsExtension(QObject *parent)
   : ConfigItem(parent), _radioAlias(), _aprsEnabled(false),
-    _dataTransmitServer(DataTransmitServer::HyteraDefinedData)
+    _dataTransmitServer(DataTransmitServer::HyteraDefinedData), _vfoARXFrequency(),
+    _vfoATXFrequency(), _vfoBRXFrequency(), _vfoBTXFrequency()
 {
 }
 
@@ -52,5 +53,57 @@ DM1702SSettingsExtension::setDataTransmitServer(DataTransmitServer server) {
   if (_dataTransmitServer == server)
     return;
   _dataTransmitServer = server;
+  emit modified(this);
+}
+
+Frequency
+DM1702SSettingsExtension::vfoARXFrequency() const {
+  return _vfoARXFrequency;
+}
+
+void
+DM1702SSettingsExtension::setVfoARXFrequency(const Frequency &frequency) {
+  if (_vfoARXFrequency == frequency)
+    return;
+  _vfoARXFrequency = frequency;
+  emit modified(this);
+}
+
+Frequency
+DM1702SSettingsExtension::vfoATXFrequency() const {
+  return _vfoATXFrequency;
+}
+
+void
+DM1702SSettingsExtension::setVfoATXFrequency(const Frequency &frequency) {
+  if (_vfoATXFrequency == frequency)
+    return;
+  _vfoATXFrequency = frequency;
+  emit modified(this);
+}
+
+Frequency
+DM1702SSettingsExtension::vfoBRXFrequency() const {
+  return _vfoBRXFrequency;
+}
+
+void
+DM1702SSettingsExtension::setVfoBRXFrequency(const Frequency &frequency) {
+  if (_vfoBRXFrequency == frequency)
+    return;
+  _vfoBRXFrequency = frequency;
+  emit modified(this);
+}
+
+Frequency
+DM1702SSettingsExtension::vfoBTXFrequency() const {
+  return _vfoBTXFrequency;
+}
+
+void
+DM1702SSettingsExtension::setVfoBTXFrequency(const Frequency &frequency) {
+  if (_vfoBTXFrequency == frequency)
+    return;
+  _vfoBTXFrequency = frequency;
   emit modified(this);
 }
