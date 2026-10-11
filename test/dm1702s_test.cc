@@ -93,6 +93,7 @@ DM1702STest::testChannelDecode() {
   QCOMPARE(config.rxGroupLists()->list(0)->contact(0)->number(), 60u);
   QCOMPARE(config.rxGroupLists()->list(0)->contact(1)->number(), 8u);
   QCOMPARE(config.rxGroupLists()->list(0)->contact(1)->name(), QStringLiteral("Group Call"));
+  config.contacts()->contact(0)->setName(QStringLiteral("michi do2ith"));
   QVERIFY(config.rxGroupLists()->list(0)->remContact(0));
 
   config.channelList()->channel(0)->setName(QStringLiteral("Renamed"));
@@ -103,6 +104,7 @@ DM1702STest::testChannelDecode() {
   QVERIFY2(codeplug.encode(&config, Codeplug::Flags(), err), qPrintable(err.format()));
   QCOMPARE(codeplug.page(0x11).mid(0x1c, 3), QByteArray::fromHex("080000"));
   QCOMPARE(codeplug.page(0x24).left(8), QByteArray("Renamed\0", 8));
+  QCOMPARE(codeplug.page(0x28).mid(2, 16), QByteArray("michi do2ith\0\0\0\0", 16));
   QCOMPARE(codeplug.page(0x04).mid(0x10, 10),
            QDate::currentDate().toString(QStringLiteral("yyyy-MM-dd")).toLatin1());
   QCOMPARE(codeplug.page(0x04).mid(0x1d0, 16), QByteArray("DO2BBC Boris Tes", 16));

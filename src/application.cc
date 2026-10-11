@@ -497,7 +497,6 @@ Application::verifyCodeplug(Radio *radio, bool showSuccess) {
   return verified;
 }
 
-
 void
 Application::downloadCodeplug() {
   if (! _mainWindow)
@@ -518,7 +517,9 @@ Application::downloadCodeplug() {
     return;
   }
 
-
+  connect(radio, SIGNAL(downloadError(Radio *)), this, SLOT(onCodeplugDownloadError(Radio *)));
+  connect(radio, SIGNAL(downloadFinished(Radio *, Codeplug *)),
+          this, SLOT(onCodeplugDownloaded(Radio *, Codeplug *)));
 
   TransferFlags flags; flags.setBlocking(false);
   ErrorStack err;

@@ -280,6 +280,7 @@ DM1702SCodeplug::decode(Config *config, const ErrorStack &err) {
         contact = new DMRContact(DMRContact::GroupCall, QStringLiteral("Group Call"), id);
         config->contacts()->add(contact);
         groupContacts.insert(id, contact);
+        _originalContacts.append({id, 0x04, std::numeric_limits<size_t>::max(), contact->name()});
       }
       group->addContact(contact);
     }
@@ -379,6 +380,10 @@ DM1702SCodeplug::encode(Config *config, const Flags &flags, const ErrorStack &er
     errMsg(err) << "Changing the number of DM1702S channels is not supported yet.";
     return false;
   }
+  if (config->contacts()->count() != _originalContacts.size()) {
+    errMsg(err) << "Adding or removing DM1702S contacts is not supported yet.";
+    return false;
+  }
   if ((config->rxGroupLists()->count() != _originalRXGroupOffsets.size()) ||
       (_originalRXGroupOffsets.size() != _originalRXGroupNames.size()) ||
       (_originalRXGroupOffsets.size() != _originalRXGroupMembers.size())) {
@@ -413,6 +418,26 @@ DM1702SCodeplug::encode(Config *config, const Flags &flags, const ErrorStack &er
   normalized.settings()->dm1702sExtension()->setRadioAlias(_originalRadioAlias);
   normalized.settings()->dm1702sExtension()->setAprsEnabled(_originalAprsEnabled);
   normalized.settings()->dm1702sExtension()->setDataTransmitServer(_originalDataTransmitServer);
+
+  for (int index=0; index<config->contacts()->count(); ++index) {
+    auto *contact = config->contacts()->contact(index)->as<DMRContact>();
+    auto *copy = normalized.contacts()->contact(index)->as<DMRContact>();
+    if ((!contact) || (!copy) || (contact->number() != _originalContacts[index].number)) {
+      errMsg(err) << "Changing DM1702S contact types, numbers or order is not supported.";
+      return false;
+    }
+    uint8_t contactType = 0;
+    switch (contact->type()) {
+    case DMRContact::PrivateCall: contactType=0x03; break;
+    case DMRContact::GroupCall: contactType=0x04; break;
+    case DMRContact::AllCall: contactType=0x05; break;
+    }
+    if (contactType != _originalContacts[index].type) {
+      errMsg(err) << "Changing DM1702S contact types is not supported.";
+      return false;
+    }
+    copy->setName(_originalContacts[index].name);
+  }
 
   for (int index=0; index<normalized.rxGroupLists()->count(); ++index) {
     RXGroupList *group = normalized.rxGroupLists()->list(index);
@@ -479,6 +504,30 @@ DM1702SCodeplug::encode(Config *config, const Flags &flags, const ErrorStack &er
     std::copy(encodedName.cbegin(), encodedName.cend(), channelNames.begin()+offset);
   }
 
+  const std::vector<std::pair<uint8_t, size_t>> contactSlices{
+    {0x28, 0x0ff0}, {0x29, 0x0ff0}, {0x2a, 0x0ff0}, {0x2b, 0x0ff0}, {0x2c, 0x0ff0}
+  };
+  QByteArray contactData;
+  if (!appendRanges(_pages, contactSlices, contactData, err))
+    return false;
+  for (int index=0; index<config->contacts()->count(); ++index) {
+    const ContactRecord &record = _originalContacts[index];
+    if (std::numeric_limits<size_t>::max() == record.dataOffset)
+      continue;
+    auto *contact = config->contacts()->contact(index)->as<DMRContact>();
+    const QString &contactName = contact->name();
+    if (contactName == record.name)
+      continue;
+    const QByteArray name = contactName.toLatin1();
+    if ((QString::fromLatin1(name) != contactName) || (name.size() > 16) ||
+        name.contains('\0') || name.contains(static_cast<char>(0xff))) {
+      errMsg(err) << "DM1702S contact names must contain at most 16 Latin-1 bytes.";
+      return false;
+    }
+    std::fill_n(contactData.begin()+record.dataOffset+2, 16, '\0');
+    std::copy(name.cbegin(), name.cend(), contactData.begin()+record.dataOffset+2);
+  }
+
   QByteArray rxListData;
   const std::vector<std::pair<uint8_t, size_t>> rxListRanges{{0x11, 0x0606}, {0x12, 0x073d}};
   if (!appendRanges(_pages, rxListRanges, rxListData, err))
@@ -528,6 +577,8 @@ DM1702SCodeplug::encode(Config *config, const Flags &flags, const ErrorStack &er
   }
 
   if (!writePages(_pages, nameSlices, channelNames, err))
+    return false;
+  if (!writeRanges(_pages, contactSlices, contactData, err))
     return false;
   if (!writeRanges(_pages, rxListRanges, rxListData, err))
     return false;
