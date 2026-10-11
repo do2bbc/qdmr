@@ -29,7 +29,7 @@ public:
   };
   Q_ENUM(DataTransmitServer)
 
-  explicit DM1702SSettingsExtension(QObject *parent=nullptr);
+  Q_INVOKABLE explicit DM1702SSettingsExtension(QObject *parent=nullptr);
 
   ConfigItem *clone() const override;
 

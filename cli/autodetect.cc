@@ -59,7 +59,17 @@ autoDetect(QCommandLineParser &parser, QCoreApplication &app, const ErrorStack &
     // If a device is passed by option, search for matching handle
     QVariant devHandle = parseDeviceHandle(parser.value("device"));
     foreach (USBDeviceDescriptor dev, interfaces) {
-      if (dev.device() == devHandle) {
+      const QVariant candidateHandle=dev.device();
+      bool matches=false;
+      if ((QMetaType::fromType<USBDeviceHandle>() == candidateHandle.metaType()) &&
+          (QMetaType::fromType<USBDeviceHandle>() == devHandle.metaType())) {
+        const USBDeviceHandle candidate=candidateHandle.value<USBDeviceHandle>();
+        const USBDeviceHandle requested=devHandle.value<USBDeviceHandle>();
+        matches=(candidate.bus == requested.bus) && (candidate.device == requested.device);
+      } else {
+        matches=(candidateHandle.toString() == devHandle.toString());
+      }
+      if (matches) {
         device = dev;
         break;
       }

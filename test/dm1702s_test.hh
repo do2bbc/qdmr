@@ -9,6 +9,7 @@ class DM1702STest : public QObject
 
 private slots:
   void testChannelDecode();
+  void testSettingsYAMLSerialization();
   void testEncodingRequiresDecodedSource();
   void testRadioRegistrationIsExplicit();
 };

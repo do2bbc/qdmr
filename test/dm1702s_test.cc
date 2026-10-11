@@ -10,6 +10,8 @@
 
 #include <QDate>
 #include <QTest>
+#include <QTemporaryFile>
+#include <QTextStream>
 #include <algorithm>
 
 namespace {
@@ -246,6 +248,39 @@ DM1702STest::testEncodingRequiresDecodedSource() {
   Config config;
   ErrorStack err;
   QVERIFY(! codeplug.encode(&config, Codeplug::Flags(), err));
+}
+
+void
+DM1702STest::testSettingsYAMLSerialization() {
+  Config source;
+  auto *settings=new DM1702SSettingsExtension();
+  source.settings()->setDM1702SExtension(settings);
+  settings->setRadioAlias(QStringLiteral("DM1702S YAML"));
+  settings->setVfoARXFrequency(Frequency::fromHz(145500000));
+  settings->setVfoATXFrequency(Frequency::fromHz(145500000));
+  settings->setVfoBRXFrequency(Frequency::fromHz(433500000));
+  settings->setVfoBTXFrequency(Frequency::fromHz(433500000));
+
+  ErrorStack err;
+  QString yaml;
+  QTextStream yamlStream(&yaml);
+  QVERIFY2(source.toYAML(yamlStream, err), qPrintable(err.format()));
+
+  QTemporaryFile file;
+  QVERIFY(file.open());
+  QTextStream fileStream(&file);
+  fileStream << yaml;
+  fileStream.flush();
+  file.close();
+
+  Config decoded;
+  QVERIFY2(decoded.readYAML(file.fileName(), err), qPrintable(err.format()));
+  QVERIFY(decoded.settings()->dm1702sExtension());
+  QCOMPARE(decoded.settings()->dm1702sExtension()->radioAlias(), QStringLiteral("DM1702S YAML"));
+  QCOMPARE(decoded.settings()->dm1702sExtension()->vfoARXFrequency(), Frequency::fromHz(145500000));
+  QCOMPARE(decoded.settings()->dm1702sExtension()->vfoATXFrequency(), Frequency::fromHz(145500000));
+  QCOMPARE(decoded.settings()->dm1702sExtension()->vfoBRXFrequency(), Frequency::fromHz(433500000));
+  QCOMPARE(decoded.settings()->dm1702sExtension()->vfoBTXFrequency(), Frequency::fromHz(433500000));
 }
 
 void
